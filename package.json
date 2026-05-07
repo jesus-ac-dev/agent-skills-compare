@@ -1,0 +1,54 @@
+{
+  "name": "agentic-repo-explorer",
+  "version": "1.0.0",
+  "description": "Pipeline inteligente para descobrir, extrair e analisar agentes, skills e workflows em repositórios GitHub e websites.",
+  "type": "module",
+  "main": "src/index.js",
+
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+
+    "crawl": "node src/crawler/crawlPage.js",
+    "search:github": "node src/github/searchRepos.js",
+    "fetch:files": "node src/github/fetchFiles.js",
+
+    "analyze": "node src/analysis/runAnalysis.js",
+    "rank": "node src/analysis/ranking.js",
+
+    "agent": "node Gemini/runtime/agent-loop.js",
+
+    "test": "vitest --run",
+    "test:watch": "vitest",
+
+    "lint": "eslint .",
+    "format": "prettier --write .",
+
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "db:types": "supabase gen types typescript --local > src/lib/supabase/types.ts"
+  },
+
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@supabase/supabase-js": "^2.95.3",
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2",
+    "simple-git": "^3.27.0"
+  },
+
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-n": "^17.7.0",
+    "eslint-plugin-promise": "^6.1.1",
+
+    "prettier": "^3.2.5",
+    "vitest": "^1.6.0",
+
+    "supabase": "^2.91.1"
+  }
+}

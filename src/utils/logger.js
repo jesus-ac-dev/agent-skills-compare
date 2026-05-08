@@ -7,9 +7,9 @@ const logger = {
   warn: (message, ...args) => console.warn(`[WARN] ${message}`, ...args),
   debug: (message, ...args) => {
     if (process.env.DEBUG) {
-      console.log(`[DEBUG] ${message}`, ...args);
+      console.log(`[DEBUG] ${message}`, ...args)
     }
   }
-};
+}
 
-export default logger;
+export default logger

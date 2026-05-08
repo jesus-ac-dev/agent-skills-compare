@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'crypto'
 
 /**
  * Generates a SHA-256 hash of the given content.
@@ -6,5 +6,5 @@ import crypto from 'crypto';
  * @returns {string} The hex-encoded hash.
  */
 export function generateHash(content) {
-  return crypto.createHash('sha256').update(content).digest('hex');
+  return crypto.createHash('sha256').update(content).digest('hex')
 }

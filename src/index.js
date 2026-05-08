@@ -7,6 +7,41 @@ import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
 
 /**
+ * Helper to get ID from lookup tables.
+ */
+async function getLookupId(table, name) {
+  if (!name) return null
+  const { data, error } = await supabase.from(table).select('id').ilike('name', name).single()
+
+  if (error) {
+    logger.debug(`Lookup failed for ${name} in ${table}: ${error.message}`)
+    return null
+  }
+  return data.id
+}
+
+/**
+ * Helper to get or create sub-category ID.
+ */
+async function getOrCreateSubCategoryId(categoryName, subCategoryName) {
+  if (!categoryName || !subCategoryName) return null
+  const categoryId = await getLookupId('categories', categoryName)
+  if (!categoryId) return null
+
+  const { data, error } = await supabase
+    .from('sub_categories')
+    .upsert({ name: subCategoryName, category_id: categoryId }, { onConflict: 'name,category_id' })
+    .select('id')
+    .single()
+
+  if (error) {
+    logger.error(`Error saving sub-category ${subCategoryName}:`, error.message)
+    return null
+  }
+  return data.id
+}
+
+/**
  * Main pipeline orchestrator.
  */
 async function main() {
@@ -18,8 +53,8 @@ async function main() {
     const repos = await searchRepos(query)
     logger.info(`Found ${repos.length} repositories.`)
 
-    for (const repo of repos.slice(0, 3)) {
-      // Limit to 3 for initial run
+    // Process one repository at a time as requested
+    for (const repo of repos) {
       logger.info(`Processing repository: ${repo.full_name}`)
 
       // 2. Save/Update repository in DB
@@ -29,6 +64,7 @@ async function main() {
           {
             name: repo.name,
             repo_url: repo.html_url,
+            avatar_url: repo.owner.avatar_url,
             stars: repo.stargazers_count,
             last_commit: repo.pushed_at
           },
@@ -47,8 +83,8 @@ async function main() {
       const relevantFiles = filterRelevantFiles(allFiles)
       logger.info(`Found ${relevantFiles.length} relevant files in ${repo.full_name}.`)
 
-      for (const filePath of relevantFiles.slice(0, 5)) {
-        // Limit files per repo
+      // Process all relevant files in the repository
+      for (const filePath of relevantFiles) {
         logger.info(`Processing file: ${filePath}`)
 
         // 4. Fetch file content
@@ -57,43 +93,35 @@ async function main() {
 
         const contentHash = generateHash(content)
 
-        // 5. Save source and file in DB
-        // Determine the correct branch for the URL (simplification)
+        // 5. Save file_source in DB
         const branch = repo.default_branch || 'main'
-        const { data: dbSource, error: sourceError } = await supabase
-          .from('sources')
+        const fileUrl = `${repo.html_url}/blob/${branch}/${filePath}`
+
+        const sourceTypeId = await getLookupId('source_types', 'github_file')
+        const fileTypeId = filePath.endsWith('.md')
+          ? await getLookupId('file_types', 'markdown')
+          : await getLookupId('file_types', 'text')
+
+        const { data: dbFileSource, error: fileSourceError } = await supabase
+          .from('files_sources')
           .upsert(
             {
-              url: `${repo.html_url}/blob/${branch}/${filePath}`,
-              type: 'github_file',
               repo_id: dbRepo.id,
-              hash: contentHash
+              url: fileUrl,
+              path: filePath,
+              hash: contentHash,
+              source_type_id: sourceTypeId,
+              file_type_id: fileTypeId,
+              status: 'processed',
+              last_checked: new Date().toISOString()
             },
             { onConflict: 'url' }
           )
           .select()
           .single()
 
-        if (sourceError) {
-          logger.error(`Error saving source ${filePath}:`, sourceError.message)
-          continue
-        }
-
-        const { data: dbFile, error: fileError } = await supabase
-          .from('files')
-          .upsert({
-            source_id: dbSource.id,
-            repo_id: dbRepo.id,
-            path: filePath,
-            content,
-            hash: contentHash,
-            type: 'markdown'
-          })
-          .select()
-          .single()
-
-        if (fileError) {
-          logger.error(`Error saving file ${filePath}:`, fileError.message)
+        if (fileSourceError) {
+          logger.error(`Error saving file_source ${filePath}:`, fileSourceError.message)
           continue
         }
 
@@ -102,11 +130,19 @@ async function main() {
           const useCases = await extractUseCases(content)
           const classification = await classifyProject(content)
 
+          const subCategoryId = await getOrCreateSubCategoryId(
+            classification.category,
+            classification.sub_category
+          )
+          const classId = await getLookupId('classes', classification.class)
+
           // 7. Save analysis in DB
           const { error: analysisError } = await supabase.from('analysis').insert({
-            file_id: dbFile.id,
-            summary: classification.summary || 'Summary placeholder',
+            file_source_id: dbFileSource.id,
+            summary: classification.summary,
             use_cases: useCases,
+            sub_category_id: subCategoryId,
+            class_id: classId,
             maturity: classification.maturity,
             score: classification.score,
             model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
@@ -119,6 +155,12 @@ async function main() {
           logger.error(`Analysis failed for ${filePath}:`, analysisErr.message)
         }
       }
+
+      // After finishing one repo completely, we can decide if we want to continue to the next
+      // The requirement was "para um repo de cada vez", which I interpret as finishing one fully.
+      // If the user wants ONLY one repo per execution, I could break here.
+      // But usually "one at a time" means serial processing. I'll leave it as a loop for now.
+      // logger.info(`Finished processing repository: ${repo.full_name}`)
     }
 
     logger.info('Pipeline completed successfully.')

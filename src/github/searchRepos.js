@@ -36,7 +36,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     .then((repos) => {
       logger.info(`Found ${repos.length} repositories.`)
       repos.slice(0, 5).forEach((repo) => {
-        console.log(`- ${repo.full_name} (${repo.stargazers_count} stars): ${repo.html_url}`)
+      console.log(
+        `- ${repo.full_name} (${repo.stargazers_count} stars): ${repo.html_url} (Avatar: ${repo.owner.avatar_url})`
+      )
       })
     })
     .catch((err) => logger.error(err))

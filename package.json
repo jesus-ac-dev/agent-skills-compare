@@ -4,31 +4,29 @@
   "description": "Pipeline inteligente para descobrir, extrair e analisar agentes, skills e workflows em repositórios GitHub e websites.",
   "type": "module",
   "main": "src/index.js",
-
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-
     "crawl": "node src/crawler/crawlPage.js",
     "search:github": "node src/github/searchRepos.js",
     "fetch:files": "node src/github/fetchFiles.js",
-
     "analyze": "node src/analysis/runAnalysis.js",
     "rank": "node src/analysis/ranking.js",
-
     "agent": "node Gemini/runtime/agent-loop.js",
-
+    "verify": "npm run format && npm run test && npm run lint",
     "test": "vitest --run",
     "test:watch": "vitest",
-
+    "test:coverage": "vitest --run --coverage",
     "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-
+    "format:check": "prettier --check .",
+    "db:start": "supabase start",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
-    "db:types": "supabase gen types typescript --local > src/lib/supabase/types.ts"
+    "db:types": "supabase gen types typescript --local > src/lib/supabase/types.ts",
+    "prepare": "husky"
   },
-
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.95.3",
@@ -38,17 +36,24 @@
     "node-fetch": "^3.3.2",
     "simple-git": "^3.27.0"
   },
-
   "devDependencies": {
+    "@vitest/coverage-v8": "^1.6.0",
     "eslint": "^9.0.0",
-    "eslint-config-standard": "^17.1.0",
-    "eslint-plugin-import": "^2.29.1",
-    "eslint-plugin-n": "^17.7.0",
-    "eslint-plugin-promise": "^6.1.1",
-
+    "globals": "^15.9.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "neostandard": "^0.12.0",
     "prettier": "^3.2.5",
-    "vitest": "^1.6.0",
-
-    "supabase": "^2.91.1"
+    "supabase": "^2.91.1",
+    "vitest": "^1.6.0"
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   }
 }

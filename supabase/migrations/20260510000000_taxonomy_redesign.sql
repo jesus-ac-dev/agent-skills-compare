@@ -22,28 +22,29 @@ DROP TABLE IF EXISTS "public"."sub_categories" CASCADE;
 DROP TABLE IF EXISTS "public"."categories" CASCADE;
 DROP TABLE IF EXISTS "public"."classes" CASCADE;
 
--- 4. analysis: drop sub_category_id (cascade above already removed FK; column may still exist)
+-- 4. analysis: drop sub_category_id and class_id columns (the CASCADE above
+-- removed the FK constraints, but the columns themselves remain and must be dropped explicitly)
 ALTER TABLE "public"."analysis" DROP COLUMN IF EXISTS "sub_category_id";
 ALTER TABLE "public"."analysis" DROP COLUMN IF EXISTS "class_id";
 
 -- 5. New lookup tables (BIGINT IDENTITY)
-CREATE TABLE "public"."classes" (
+CREATE TABLE IF NOT EXISTS "public"."classes" (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-CREATE TABLE "public"."domains" (
+CREATE TABLE IF NOT EXISTS "public"."domains" (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-CREATE TABLE "public"."activities" (
+CREATE TABLE IF NOT EXISTS "public"."activities" (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL
 );
 CREATE UNIQUE INDEX idx_activities_lower_name ON "public"."activities"(LOWER(name));
 
-CREATE TABLE "public"."tags" (
+CREATE TABLE IF NOT EXISTS "public"."tags" (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name TEXT NOT NULL
 );
@@ -51,25 +52,25 @@ CREATE UNIQUE INDEX idx_tags_lower_name ON "public"."tags"(LOWER(name));
 
 -- 6. analysis: add class_id (BIGINT, nullable for defensive fallback) + UNIQUE(file_source_id)
 ALTER TABLE "public"."analysis"
-    ADD COLUMN "class_id" BIGINT REFERENCES "public"."classes"(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS "class_id" BIGINT REFERENCES "public"."classes"(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."analysis"
     ADD CONSTRAINT analysis_file_source_unique UNIQUE (file_source_id);
 
 -- 7. M2M tables
-CREATE TABLE "public"."analysis_domains" (
+CREATE TABLE IF NOT EXISTS "public"."analysis_domains" (
     analysis_id BIGINT NOT NULL REFERENCES "public"."analysis"(id) ON DELETE CASCADE,
     domain_id   BIGINT NOT NULL REFERENCES "public"."domains"(id)  ON DELETE CASCADE,
     PRIMARY KEY (analysis_id, domain_id)
 );
 
-CREATE TABLE "public"."analysis_activities" (
+CREATE TABLE IF NOT EXISTS "public"."analysis_activities" (
     analysis_id BIGINT NOT NULL REFERENCES "public"."analysis"(id)   ON DELETE CASCADE,
     activity_id BIGINT NOT NULL REFERENCES "public"."activities"(id) ON DELETE CASCADE,
     PRIMARY KEY (analysis_id, activity_id)
 );
 
-CREATE TABLE "public"."analysis_tags" (
+CREATE TABLE IF NOT EXISTS "public"."analysis_tags" (
     analysis_id BIGINT NOT NULL REFERENCES "public"."analysis"(id) ON DELETE CASCADE,
     tag_id      BIGINT NOT NULL REFERENCES "public"."tags"(id)     ON DELETE CASCADE,
     PRIMARY KEY (analysis_id, tag_id)
@@ -99,3 +100,8 @@ INSERT INTO "public"."activities" (name) VALUES
     ('evaluation'), ('knowledge-mgmt'), ('productivity'), ('learning'),
     ('migration'), ('monitoring')
 ON CONFLICT DO NOTHING;
+
+-- 10. Reverse-direction indexes on M2M tables
+CREATE INDEX IF NOT EXISTS idx_analysis_domains_domain_id      ON "public"."analysis_domains"(domain_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_activities_activity_id ON "public"."analysis_activities"(activity_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_tags_tag_id            ON "public"."analysis_tags"(tag_id);

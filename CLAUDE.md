@@ -38,6 +38,13 @@ Requer `.env` com `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, `
 - Pre-commit hook (husky + lint-staged) corre prettier e eslint em ficheiros staged. **Não bypass** com `--no-verify` — resolve a causa.
 - Pipeline state machine: ver `processRepo` em `src/index.js`. Falhas catastróficas (listagem de ficheiros) → `status='failed'`. Erros isolados de ficheiros → `error_count++` e continua.
 
+## Comportamento do pipeline (resume + skip por hash + quota)
+
+- **Resume:** no arranque, `findResumableRepos` apanha repos com `status` ∈ `{processing, pending}` e processa-os antes da pesquisa GitHub. `processing` significa "ficou a meio na corrida anterior" → entra primeiro. `done` e `failed` são saltados.
+- **Skip por hash:** dentro de cada repo, `loadAnalyzedHashes(repoId)` carrega `(url → hash)` dos ficheiros que já têm `analysis`. Para cada ficheiro, depois do download e do `generateHash`, se o hash bater certo com o que está em BD, salta a chamada ao LLM. Resultado: re-runs do mesmo corpus = 0 chamadas LLM em ficheiros inalterados.
+- **Daily quota:** `groqClient.js` exporta `DailyQuotaExceededError`. Quando o erro é detectado (regex em `tpd|rpd|per-day|daily` na mensagem), o pipeline propaga e sai limpo, deixando o repo actual como `processing` para retomar no próximo run após o reset (geralmente meia-noite UTC).
+- **Per-repo refresh (futuro / via UI):** basta pôr `repos.status='pending'` para esse repo e correr o pipeline outra vez — entra na fila do `findResumableRepos`. Ficheiros com hash diferente são re-analisados; iguais são saltados.
+
 ## LLM (Groq por defeito)
 
 - O classifier usa **Groq** (`llama-3.3-70b-versatile` por defeito) via `src/analysis/groqClient.js`. Free tier muito mais generoso que o Gemini (≈14k req/dia vs 20).

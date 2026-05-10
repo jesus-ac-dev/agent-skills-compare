@@ -25,9 +25,17 @@ function isRateLimitError(error) {
   return /\b429\b|too many requests|rate.?limit/i.test(error?.message ?? '')
 }
 
+export class DailyQuotaExceededError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'DailyQuotaExceededError'
+  }
+}
+
 function isDailyQuotaError(error) {
   const message = error?.message ?? ''
-  return /per.?day|daily/i.test(message)
+  // Groq messages: "tokens per day (TPD): Limit ..." or "requests per day (RPD): Limit ..."
+  return /\b(tpd|rpd|per[\s-]?day|daily)\b/i.test(message)
 }
 
 function parseRetryDelayMs(error, attempt) {
@@ -60,8 +68,8 @@ async function callWithRetry(messages, options) {
       })
     } catch (error) {
       if (isDailyQuotaError(error)) {
-        logger.error('Groq daily quota exceeded — aborting (no point retrying).')
-        throw error
+        logger.error(`Groq daily quota exceeded — aborting: ${error.message}`)
+        throw new DailyQuotaExceededError(error.message)
       }
       if (!isRateLimitError(error) || attempt > MAX_RETRIES) throw error
       const waitMs = parseRetryDelayMs(error, attempt)

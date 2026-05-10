@@ -33,6 +33,7 @@
     "axios": "^1.7.2",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.5",
+    "groq-sdk": "^1.1.2",
     "node-fetch": "^3.3.2",
     "simple-git": "^3.27.0"
   },

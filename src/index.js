@@ -41,7 +41,7 @@ async function persistClassification(fileSourceId, payload) {
         class_id: classId,
         maturity,
         score,
-        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
+        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
       },
       { onConflict: 'file_source_id' }
     )

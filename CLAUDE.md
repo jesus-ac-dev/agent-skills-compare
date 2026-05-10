@@ -17,7 +17,7 @@ npm run db:push                # aplica só as pendentes
 npm start "agent skills"       # corre o pipeline para a query
 ```
 
-Requer `.env` com `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `GITHUB_TOKEN` (opcional mas recomendado).
+Requer `.env` com `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, `GITHUB_TOKEN` (opcional mas recomendado). Ver [.env.example](.env.example).
 
 ## Schema (estado actual — pós taxonomia v3)
 
@@ -38,11 +38,13 @@ Requer `.env` com `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`,
 - Pre-commit hook (husky + lint-staged) corre prettier e eslint em ficheiros staged. **Não bypass** com `--no-verify` — resolve a causa.
 - Pipeline state machine: ver `processRepo` em `src/index.js`. Falhas catastróficas (listagem de ficheiros) → `status='failed'`. Erros isolados de ficheiros → `error_count++` e continua.
 
-## Gemini
+## LLM (Groq por defeito)
 
-- `src/analysis/geminiClient.js` aceita `analyzeContent(content, prompt, { schema, temperature })`. Quando passas `schema`, usa o modo nativo de structured output do Gemini (`responseMimeType: 'application/json'` + `responseSchema`). Resposta é `JSON.parse(text)` directo, sem regex.
-- O classifier (`src/analysis/classifyProject.js`) constrói o schema em runtime a partir de `loadClosedVocabulary()` — adicionar uma `class` ou `domain` é só uma migration.
-- `temperature: 0.4` por defeito no classifier (suficiente para variar summaries, mantém-se factual).
+- O classifier usa **Groq** (`llama-3.3-70b-versatile` por defeito) via `src/analysis/groqClient.js`. Free tier muito mais generoso que o Gemini (≈14k req/dia vs 20).
+- `analyzeContent(content, prompt, { schema, temperature })` espelha a interface do `geminiClient.js`. Quando `schema` é passado, usa `response_format: { type: 'json_object' }` (não impõe schema do lado do servidor — confia no prompt).
+- O classifier (`src/analysis/classifyProject.js`) injecta as listas fechadas de `classes` e `domains` no system prompt em runtime via `loadClosedVocabulary()`. Adicionar uma class/domain é só uma migration.
+- `temperature: 0.4` por defeito (variação suficiente, mantém-se factual).
+- `geminiClient.js` continua na árvore como referência / fallback opcional. Para o usar, troca o import em `classifyProject.js` para `./geminiClient.js` e configura `GEMINI_API_KEY` no `.env`. O Gemini suporta `responseSchema` nativo (impõe schema do lado do servidor) — útil se quiseres esquemas com `minLength`/`minItems`/`enum` strict.
 
 ## Helpers DB
 

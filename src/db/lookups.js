@@ -35,7 +35,7 @@ export async function upsertOpenId(table, name) {
     .single()
 
   if (error) {
-    logger.debug(`upsertOpenId(${table}, ${name}) error: ${error.message}`)
+    logger.warn(`upsertOpenId(${table}, ${name}) error: ${error.message}`)
     return null
   }
   return data?.id ?? null

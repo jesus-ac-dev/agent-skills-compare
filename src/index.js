@@ -82,12 +82,12 @@ async function persistClassification(fileSourceId, payload) {
     supabase.from('analysis_tags').delete().eq('analysis_id', analysisId)
   ])
 
+  // Domains: prompt steers the classifier to the existing list, but if a new
+  // legitimate value comes back (e.g. "marketing"), upsert it instead of dropping.
   for (const domain of domains) {
-    const id = await resolveClosedId('domains', domain)
+    const id = await upsertOpenId('domains', domain)
     if (id) {
       await supabase.from('analysis_domains').insert({ analysis_id: analysisId, domain_id: id })
-    } else {
-      logger.warn(`Unknown domain from classifier: ${domain}`)
     }
   }
 

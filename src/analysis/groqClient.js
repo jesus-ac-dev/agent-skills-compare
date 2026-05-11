@@ -8,6 +8,10 @@ const MODEL_NAME = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
 const MAX_RETRIES = Number(process.env.GROQ_MAX_RETRIES ?? 3)
 const DEFAULT_RETRY_DELAY_MS = 5_000
 const MAX_RETRY_DELAY_MS = 60_000
+// How long we're willing to sleep when the daily token/request quota is hit.
+// Default = 1h. Anything longer aborts cleanly so the user can decide.
+const MAX_DAILY_WAIT_MS = Number(process.env.GROQ_MAX_DAILY_WAIT_MS ?? 60 * 60 * 1000)
+const DAILY_WAIT_BUFFER_MS = 10_000
 
 let _client
 function getClient() {
@@ -36,6 +40,19 @@ function isDailyQuotaError(error) {
   const message = error?.message ?? ''
   // Groq messages: "tokens per day (TPD): Limit ..." or "requests per day (RPD): Limit ..."
   return /\b(tpd|rpd|per[\s-]?day|daily)\b/i.test(message)
+}
+
+/**
+ * Parses Groq's "Please try again in 27m27.648s" style message and returns
+ * the delay in milliseconds. Returns null if the format isn't recognised.
+ */
+function parseDailyQuotaDelayMs(message) {
+  const match = String(message ?? '').match(/try again in\s+(?:(\d+)m)?(\d+(?:\.\d+)?)?\s*s/i)
+  if (!match) return null
+  const minutes = Number(match[1] ?? 0)
+  const seconds = Number(match[2] ?? 0)
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return null
+  return Math.ceil((minutes * 60 + seconds) * 1000)
 }
 
 function parseRetryDelayMs(error, attempt) {
@@ -68,7 +85,20 @@ async function callWithRetry(messages, options) {
       })
     } catch (error) {
       if (isDailyQuotaError(error)) {
-        logger.error(`Groq daily quota exceeded — aborting: ${error.message}`)
+        const delayMs = parseDailyQuotaDelayMs(error.message)
+        if (delayMs !== null && delayMs <= MAX_DAILY_WAIT_MS) {
+          const totalMs = delayMs + DAILY_WAIT_BUFFER_MS
+          const minutes = Math.ceil(totalMs / 60_000)
+          logger.warn(
+            `Groq daily quota hit — sleeping ~${minutes}min then resuming. ` +
+              `(Set GROQ_MAX_DAILY_WAIT_MS to change the cap; current cap = ${Math.round(MAX_DAILY_WAIT_MS / 60_000)}min.)`
+          )
+          await sleep(totalMs)
+          continue
+        }
+        logger.error(
+          `Groq daily quota exceeded and wait would exceed the cap. Aborting: ${error.message}`
+        )
         throw new DailyQuotaExceededError(error.message)
       }
       if (!isRateLimitError(error) || attempt > MAX_RETRIES) throw error

@@ -1,48 +1,50 @@
 # Roadmap
 
-Próximas etapas após o redesign de schema/taxonomia v3 (commits `130b626..306941d`).
+Estado depois do redesign de schema/taxonomia v3 e fixes subsequentes.
 
-## 1. Modos de execução: incremental vs refresh
+## ✅ Já feito
 
-**Problema:** hoje o pipeline volta a processar **todos** os repos da query a cada run. Em queries grandes ou re-runs frequentes isto é desperdício de chamadas Gemini e pressão sobre rate-limits.
+- **Taxonomia multi-eixo** (commits `130b626..306941d`): `repos.status`, classes/domains/activities/tags + M2M, structured output do classifier.
+- **Fix M2M + Groq como provedor** (`3ba57c3`, `33a5e33`): tabelas `tags`/`activities` populadas como deve ser; free tier do Groq (~14k req/dia) substitui o limite de 20/dia do Gemini.
+- **Resume + hash skip + saída limpa em daily quota** (`aa1f7bf`): re-runs do mesmo corpus = 0 chamadas LLM em ficheiros inalterados; repos `processing` retomados ao arranque; daily quota propaga-se sem stack trace.
+- **Domain semi-open + auto-wait em daily quota**: domains desconhecidos (ex.: `marketing`) são auto-inseridos em vez de descartados; quando o erro de TPD/RPD vem com delay parseável e o delay é ≤ `GROQ_MAX_DAILY_WAIT_MS` (default 1h), o pipeline dorme + 10s e retoma sozinho.
+- **Snapshot da BD** em [docs/database/](database/) — schema + sample data + queries-tipo para a UI.
 
-**Proposta:** dois caminhos explícitos, controlados por flag de CLI ou variável de ambiente.
+Isto resolve a **Etapa 1** original (incremental vs refresh) na prática:
 
-### 1a. Modo `incremental` (default)
+- Incremental: já é o default. `done` salta, `processing`+`pending` resumem, hash igual salta.
+- Refresh per-repo: `UPDATE repos SET status='pending' WHERE id=?` (a UI pode disparar isto com um botão).
+- Refresh global: `UPDATE repos SET status='pending'` — re-roda tudo, hash skip mantém custo baixo.
 
-Só processa repos novos ou com trabalho por terminar:
+## Próximas etapas
 
-- Repos com `status='done'` **são saltados**.
-- Repos com `status='pending'`, `'failed'`, ou que ainda não existem em BD são processados normalmente.
-- A metadata superficial (`stars`, `last_commit`, `avatar_url`) **continua** a ser actualizada via upsert — barato e dá frescura.
+### A. Canonicalização do vocabulário aberto
 
-### 1b. Modo `refresh`
+**Problema:** dados reais já mostram fragmentação previsível em `activities` e `tags`:
 
-Reprocessa tudo, ignorando o `status` actual:
+| Cluster       | Variantes observadas                                                                                 | Canónica sugerida                      |
+| ------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Análise       | `analyzing`, `analysis`, `data-analysis`, `failure-analysis`, `writing-style-analysis`               | `data-analysis` (seed)                 |
+| Optimização   | `optimizing`, `optimization`, `content-optimization`, `outreach-optimization`                        | `performance-tuning` ou `optimization` |
+| Pesquisa      | `researching`, `research`                                                                            | `research` (seed)                      |
+| Implementação | `implementing`, `implementation`                                                                     | `implementation`                       |
+| Segurança     | `security-audit`, `security-auditing`, `auditing`, `vulnerability-assessment`, `penetration-testing` | `security-audit` (seed)                |
+| Design        | `designing`, `api-design`, `architecture-planning`, `workflow-design`                                | `planning` ou novo `design`            |
 
-- Cada repo passa pelo state machine completo (`processing` → `done`).
-- Como o `analysis` tem `UNIQUE(file_source_id)` e usamos upsert, os dados velhos são substituídos cleanmente; as M2M são limpas e reconstruídas em `persistClassification`.
-- Útil quando se troca o modelo Gemini, se altera o prompt do classifier, ou se acrescenta um domain/class novo na taxonomia.
+**Proposta — duas vertentes:**
 
-### Como invocar
+1. **Prevenir** (fix no prompt, ~10 linhas): carregar a lista actual de `activities` (e `domains`) da BD e injectá-la no system prompt como _"PREFER these existing values when they fit; only invent new ones for truly novel concepts. Use noun form, not gerund (e.g. 'analysis', not 'analyzing')."_ Reduz fragmentação em re-runs futuros sem mexer em dados antigos.
 
-Sugestão: `npm start -- --mode=incremental "query"` (default) e `npm start -- --mode=refresh "query"`. Implementação: parsear `process.argv` em `src/index.js` antes do `main()`.
+2. **Corrigir** (canonicalizar o que já existe): comando standalone `npm run db:canonicalize` que aplica um mapa `{ analyzing → analysis, researching → research, ... }` actualizando `analysis_activities`/`analysis_tags` para apontar para a entrada canónica e apagando duplicados. Mapa fica em `config/canonical-aliases.json` para o utilizador editar.
 
-### Critérios de aceitação
+**Critérios de aceitação:**
 
-- Re-correr o pipeline com a mesma query sem `--mode=refresh` não chama Gemini para repos `done`.
-- `--mode=refresh` chama Gemini para todos os repos da query, e a contagem de linhas em `analysis` mantém-se estável (não duplica).
-- Logs informam claramente o modo activo e quantos repos foram saltados.
+- Depois de aplicar o fix do prompt, um run novo num repo grande não produz duplicados óbvios (gerund/noun, plural/singular).
+- Depois de correr `db:canonicalize` com um mapa razoável, a contagem em `activities` cai ≥ 20% sem perder informação (cada eliminado tem um destino canónico, todas as M2M são preservadas).
 
----
+### B. Lista curada de repos seed
 
-## 2. Lista curada de repos seed
-
-**Problema:** confiar 100% na pesquisa GitHub deixa de fora repos canónicos conhecidos (ex.: `awesome-claude-code`, repos oficiais da Anthropic, colecções pessoais que valem indexar). E queries diferentes podem perder os mesmos repos.
-
-**Proposta:** ficheiro de configuração estático com uma lista de URLs/`owner/name` que é processada **antes** da query GitHub, no mesmo run.
-
-### Esboço
+Igual ao plano original — processar `config/curated-repos.json` antes da pesquisa GitHub para garantir cobertura de repos canónicos (Anthropic oficiais, awesome-claude-code, etc.).
 
 `config/curated-repos.json`:
 
@@ -62,55 +64,48 @@ Sugestão: `npm start -- --mode=incremental "query"` (default) e `npm start -- -
 Em `src/index.js`, antes do `searchRepos`:
 
 1. Carregar o JSON, dedupe por URL.
-2. Para cada entrada, fazer um GET ao endpoint `/repos/{owner}/{name}` da API GitHub para obter a metadata completa (stars, default_branch, etc.) — a mesma forma do `searchRepos`.
-3. Concatenar com o resultado de `searchRepos(query)`, dedupe final por `repo_url`.
+2. Para cada entrada, `fetchRepoDetails(owner, name)` (já existe no `searchRepos.js`).
+3. Concatenar com `searchRepos(query)`, dedupe final por `repo_url`.
 
-### Critérios de aceitação
+A lista curada é processada mesmo se a query falhar (ex.: GitHub rate-limited) — garantia mínima.
 
-- Se a lista curada tiver 5 repos e a query devolver 10 (3 dos quais já estão na curada), o pipeline processa 12 repos únicos no total.
-- A lista curada é processada mesmo se a query falhar (ex.: GitHub rate-limited) — útil como fallback de "garantia mínima".
-- O motivo (`reason`) é guardado em `repos.tags` ou num campo dedicado — decisão a fechar quando se implementar.
+### C. UI simples para ler os dados (sub-projecto)
 
----
+**Handoff para Jules AI:** [docs/database/README.md](database/README.md) tem schema, sample data, modelo conceptual, queries-tipo. A `analysis_with_axes` view é a primeira coisa a materializar; o resto é UI por cima dela.
 
-## 3. UI simples para ler os dados recolhidos
+**Stack sugerida:**
 
-**Problema:** Supabase Studio é OK para consultar tabelas mas não dá uma vista de produto — quem é capaz de filtrar por "skills de code-review em backend Python" hoje precisa de escrever SQL.
+- Next.js 15 App Router + `@supabase/supabase-js` (anon key, read-only).
+- `shadcn/ui` para componentes; tabela com `@tanstack/react-table`.
+- Filtros em URL via `useSearchParams` (URL = estado).
 
-**Proposta:** Next.js App Router + Supabase JS client (anónimo, RLS read-only) com 2-3 vistas:
+**Vistas mínimas:**
 
-- **Lista de repos** com filtros lado-a-lado: `class`, `domain`, `activity`, `tag`, intervalo de score, maturity. Cada card mostra avatar + nome + summary + chips dos eixos.
-- **Detalhe de repo** com lista de ficheiros analisados, classificação por ficheiro, use_cases.
-- **Stats globais**: top tags, distribuição por class, % com cada domain, evolução do `last_processed_at` (heatmap simples).
+1. **Lista** — filtros lado-a-lado por `class`, `domains` (multi-select OR), `activities` (multi-select OR), `tags`, score mínimo, maturity. Cards com avatar/nome/summary/chips dos eixos.
+2. **Detalhe de repo** — lista de ficheiros analisados + classificação por ficheiro + `use_cases`.
+3. **Stats** — top tags/activities/domains, distribuição por class, contagem por status.
 
-### Stack
+**Operações de pipeline disparadas da UI:**
 
-- Next.js 15 (App Router) — SSR para SEO se um dia for público.
-- `@supabase/supabase-js` (read-only com `anon key`).
-- `shadcn/ui` para componentes; tabela com `@tanstack/react-table` para o filtro.
-- Sem state management externo — `useSearchParams` para os filtros (URL = estado).
+- "Reanalisar repo" → `UPDATE repos SET status='pending' WHERE id=?`. O pipeline (quando correr) apanha-o em `findResumableRepos`.
+- "Marcar como ignorado" → idealmente novo estado `archived` ou flag separada; fora de scope mínimo.
 
-### Schema queries necessárias
+**Onde fica:** sub-pasta `web/` na raiz (monorepo simples) ou repo separado se a UI crescer.
 
-- Lista filtrada: JOIN `repos × analysis × M2M tables`. Vai exigir uma view ou função SQL para tornar a query trivial do lado do client. Sugestão: `CREATE VIEW analysis_with_axes AS SELECT a.*, c.name AS class, ARRAY_AGG(DISTINCT d.name) AS domains, ARRAY_AGG(DISTINCT act.name) AS activities, ARRAY_AGG(DISTINCT t.name) AS tags FROM analysis a LEFT JOIN classes c ... GROUP BY a.id, c.name`.
-- Stats: count + group by directos sobre essa view.
+### D. Operações de qualidade contínua
 
-### Critérios de aceitação
+Pequenas mas úteis quando a BD começar a crescer:
 
-- Carregar a lista com 200 repos e aplicar 2 filtros leva < 500ms.
-- Os filtros multi-select funcionam como AND entre eixos e OR dentro do mesmo eixo (ex.: `domain=backend OR data-ai`, **e** `activity=code-review`).
-- Não expõe a `service_role_key` no cliente.
-
-### Onde fica o código
-
-Sub-pasta `web/` na raiz do repo (monorepo simples) ou repo separado se a UI crescer. Decisão a fechar quando se começar.
-
----
+- **`npm run db:health`** — relatório SQL rápido: repos por estado, ficheiros sem análise, análises órfãs, top erros recentes. Útil para detectar drift antes de virar problema.
+- **Truncar `summary` muito longos** ou ter um campo `summary_short` derivado — alguns ficheiros gigantes produzem summaries de várias frases que partem layouts da UI.
+- **Re-classify** com modelo melhor (ex.: trocar `llama-3.3-70b-versatile` por algo do Tier 1 pago): combinado com `db:canonicalize` e com hash skip, fica relativamente barato testar diferentes modelos em batch.
 
 ## Ordem sugerida
 
-1. (1a) Modo incremental — tem o maior ROI imediato e evita re-trabalho enquanto se itera no resto.
-2. (2) Lista curada — pequena, dá garantia mínima de cobertura.
-3. (3) UI — só faz sentido depois de (1) e (2) terem enchido a BD com dados decentes.
+1. (A1) Fix do prompt para canonicalização — 10 linhas, payoff imediato.
+2. (C) UI via Jules AI — desbloqueia produto real.
+3. (A2) Canonicalização retroactiva — quando houver dados suficientes para justificar.
+4. (B) Lista curada — quando quiseres garantir cobertura.
+5. (D) Operações de qualidade — só quando a dor aparecer.
 
 Cada uma destas etapas merece o seu próprio brainstorming + spec + plano antes de implementar — o ciclo `superpowers:brainstorming → writing-plans → subagent-driven-development` deu bons frutos no v3.

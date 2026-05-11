@@ -16,6 +16,10 @@ Este projeto usa:
 
 Criar um sistema capaz de descobrir e catalogar "skills" e padrões agênticos reutilizáveis, organizados por classes, domínios e atividades.
 
+1. **Descobrir repositórios relevantes**
+   - via GitHub Search API
+   - via listas externas (web crawler leve - planned)
+
 ## 🚀 Como Correr
 
 ### 1. Requisitos

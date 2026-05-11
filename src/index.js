@@ -1,129 +1,284 @@
-import { searchRepos } from './github/searchRepos.js'
+import { searchRepos, fetchRepoDetails, parseRepoUrl } from './github/searchRepos.js'
 import { listFilesRecursive, filterRelevantFiles, fetchFile } from './github/fetchFiles.js'
-import { extractUseCases } from './analysis/extractUseCases.js'
 import { classifyProject } from './analysis/classifyProject.js'
+import { DailyQuotaExceededError } from './analysis/groqClient.js'
 import { generateHash } from './utils/hash.js'
 import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
+import { resolveClosedId, upsertOpenId } from './db/lookups.js'
+
+async function setRepoStatus(repoId, patch) {
+  const { error } = await supabase.from('repos').update(patch).eq('id', repoId)
+  if (error) logger.error(`Failed to update repo ${repoId} status:`, error.message)
+}
+
+async function recordFileError(repoId, message) {
+  const { data } = await supabase.from('repos').select('error_count').eq('id', repoId).single()
+  const next = (data?.error_count ?? 0) + 1
+  await supabase.from('repos').update({ error_count: next, last_error: message }).eq('id', repoId)
+}
 
 /**
- * Main pipeline orchestrator.
+ * Returns a Set of file URLs that already have a current analysis row for this repo.
+ * "Current" = files_sources.hash matches what's in DB (no need to re-check, since we
+ * compare against the freshly-computed hash before each Groq call).
  */
-async function main() {
-  const query = process.argv[2] || 'agent skills'
-  logger.info(`Starting pipeline for query: "${query}"`)
+async function loadAnalyzedHashes(repoId) {
+  const { data, error } = await supabase
+    .from('files_sources')
+    .select('url, hash, analysis(id)')
+    .eq('repo_id', repoId)
+  if (error) {
+    logger.warn(`loadAnalyzedHashes(${repoId}) error: ${error.message}`)
+    return new Map()
+  }
+  const map = new Map()
+  for (const row of data ?? []) {
+    if (row.analysis && row.analysis.id != null) {
+      map.set(row.url, row.hash)
+    }
+  }
+  return map
+}
 
+async function persistClassification(fileSourceId, payload) {
+  const {
+    summary,
+    maturity,
+    score,
+    class: className,
+    domains = [],
+    activities = [],
+    tags = [],
+    use_cases: useCases = []
+  } = payload
+
+  const classId = await resolveClosedId('classes', className)
+
+  const { data: analysisRow, error: analysisErr } = await supabase
+    .from('analysis')
+    .upsert(
+      {
+        file_source_id: fileSourceId,
+        summary,
+        use_cases: useCases,
+        class_id: classId,
+        maturity,
+        score,
+        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
+      },
+      { onConflict: 'file_source_id' }
+    )
+    .select('id')
+    .single()
+
+  if (analysisErr) throw new Error(`analysis upsert: ${analysisErr.message}`)
+  const analysisId = analysisRow.id
+
+  // Wipe previous M2M rows so re-runs don't accumulate stale links.
+  await Promise.all([
+    supabase.from('analysis_domains').delete().eq('analysis_id', analysisId),
+    supabase.from('analysis_activities').delete().eq('analysis_id', analysisId),
+    supabase.from('analysis_tags').delete().eq('analysis_id', analysisId)
+  ])
+
+  // Domains: prompt steers the classifier to the existing list, but if a new
+  // legitimate value comes back (e.g. "marketing"), upsert it instead of dropping.
+  for (const domain of domains) {
+    const id = await upsertOpenId('domains', domain)
+    if (id) {
+      await supabase.from('analysis_domains').insert({ analysis_id: analysisId, domain_id: id })
+    }
+  }
+
+  for (const activity of activities) {
+    const id = await upsertOpenId('activities', activity)
+    if (id) {
+      await supabase
+        .from('analysis_activities')
+        .insert({ analysis_id: analysisId, activity_id: id })
+    }
+  }
+
+  for (const tag of tags) {
+    const id = await upsertOpenId('tags', tag)
+    if (id) {
+      await supabase.from('analysis_tags').insert({ analysis_id: analysisId, tag_id: id })
+    }
+  }
+}
+
+/**
+ * Processes one repo. Throws DailyQuotaExceededError if the LLM daily quota
+ * is exhausted mid-loop — the repo is left as 'processing' so the next run
+ * resumes it.
+ */
+async function processRepo(repo) {
+  logger.info(`Processing repository: ${repo.full_name}`)
+
+  const { data: dbRepo, error: repoError } = await supabase
+    .from('repos')
+    .upsert(
+      {
+        name: repo.name,
+        repo_url: repo.html_url,
+        avatar_url: repo.owner.avatar_url,
+        stars: repo.stargazers_count,
+        last_commit: repo.pushed_at
+      },
+      { onConflict: 'repo_url' }
+    )
+    .select('id')
+    .single()
+
+  if (repoError) {
+    logger.error(`Error saving repo ${repo.full_name}:`, repoError.message)
+    return
+  }
+  const repoId = dbRepo.id
+
+  await setRepoStatus(repoId, {
+    status: 'processing',
+    error_count: 0,
+    last_error: null
+  })
+
+  let allFiles
   try {
-    // 1. Search for repositories
-    const repos = await searchRepos(query)
-    logger.info(`Found ${repos.length} repositories.`)
+    allFiles = await listFilesRecursive(repo.owner.login, repo.name)
+  } catch (e) {
+    logger.error(`Failed to list files for ${repo.full_name}: ${e.message}`)
+    await setRepoStatus(repoId, {
+      status: 'failed',
+      last_error: e.message,
+      last_processed_at: new Date().toISOString()
+    })
+    return
+  }
 
-    for (const repo of repos.slice(0, 3)) {
-      // Limit to 3 for initial run
-      logger.info(`Processing repository: ${repo.full_name}`)
+  const relevantFiles = filterRelevantFiles(allFiles)
+  logger.info(`Found ${relevantFiles.length} relevant files in ${repo.full_name}.`)
 
-      // 2. Save/Update repository in DB
-      const { data: dbRepo, error: repoError } = await supabase
-        .from('repos')
-        .upsert(
-          {
-            name: repo.name,
-            repo_url: repo.html_url,
-            stars: repo.stargazers_count,
-            last_commit: repo.pushed_at
-          },
-          { onConflict: 'repo_url' }
-        )
-        .select()
-        .single()
+  const analyzedHashes = await loadAnalyzedHashes(repoId)
+  const sourceTypeId = await resolveClosedId('source_types', 'github_file')
+  const branch = repo.default_branch || 'main'
 
-      if (repoError) {
-        logger.error(`Error saving repo ${repo.full_name}:`, repoError.message)
+  let skipped = 0
+  for (const filePath of relevantFiles) {
+    const fileUrl = `${repo.html_url}/blob/${branch}/${filePath}`
+    try {
+      const content = await fetchFile(repo.owner.login, repo.name, filePath)
+      if (!content) continue
+      const hash = generateHash(content)
+
+      // Skip when an analysis already exists for the same content.
+      if (analyzedHashes.get(fileUrl) === hash) {
+        skipped++
         continue
       }
 
-      // 3. List and filter relevant files
-      const allFiles = await listFilesRecursive(repo.owner.login, repo.name)
-      const relevantFiles = filterRelevantFiles(allFiles)
-      logger.info(`Found ${relevantFiles.length} relevant files in ${repo.full_name}.`)
+      logger.info(`Processing file: ${filePath}`)
+      const fileTypeId = await resolveClosedId(
+        'file_types',
+        filePath.endsWith('.md') ? 'markdown' : 'text'
+      )
 
-      for (const filePath of relevantFiles.slice(0, 5)) {
-        // Limit files per repo
-        logger.info(`Processing file: ${filePath}`)
-
-        // 4. Fetch file content
-        const content = await fetchFile(repo.owner.login, repo.name, filePath)
-        if (!content) continue
-
-        const contentHash = generateHash(content)
-
-        // 5. Save source and file in DB
-        // Determine the correct branch for the URL (simplification)
-        const branch = repo.default_branch || 'main'
-        const { data: dbSource, error: sourceError } = await supabase
-          .from('sources')
-          .upsert(
-            {
-              url: `${repo.html_url}/blob/${branch}/${filePath}`,
-              type: 'github_file',
-              repo_id: dbRepo.id,
-              hash: contentHash
-            },
-            { onConflict: 'url' }
-          )
-          .select()
-          .single()
-
-        if (sourceError) {
-          logger.error(`Error saving source ${filePath}:`, sourceError.message)
-          continue
-        }
-
-        const { data: dbFile, error: fileError } = await supabase
-          .from('files')
-          .upsert({
-            source_id: dbSource.id,
-            repo_id: dbRepo.id,
+      const { data: fileSource, error: fsError } = await supabase
+        .from('files_sources')
+        .upsert(
+          {
+            repo_id: repoId,
+            url: fileUrl,
             path: filePath,
-            content,
-            hash: contentHash,
-            type: 'markdown'
-          })
-          .select()
-          .single()
+            hash,
+            source_type_id: sourceTypeId,
+            file_type_id: fileTypeId,
+            last_checked: new Date().toISOString()
+          },
+          { onConflict: 'url' }
+        )
+        .select('id')
+        .single()
 
-        if (fileError) {
-          logger.error(`Error saving file ${filePath}:`, fileError.message)
-          continue
-        }
+      if (fsError) throw new Error(`files_sources upsert: ${fsError.message}`)
 
-        // 6. Analyze with Gemini
-        try {
-          const useCases = await extractUseCases(content)
-          const classification = await classifyProject(content)
-
-          // 7. Save analysis in DB
-          const { error: analysisError } = await supabase.from('analysis').insert({
-            file_id: dbFile.id,
-            summary: classification.summary || 'Summary placeholder',
-            use_cases: useCases,
-            maturity: classification.maturity,
-            score: classification.score,
-            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
-          })
-
-          if (analysisError) {
-            logger.error(`Error saving analysis for ${filePath}:`, analysisError.message)
-          }
-        } catch (analysisErr) {
-          logger.error(`Analysis failed for ${filePath}:`, analysisErr.message)
-        }
+      const classification = await classifyProject(content)
+      await persistClassification(fileSource.id, classification)
+    } catch (err) {
+      if (err instanceof DailyQuotaExceededError) {
+        // Bubble up — repo stays 'processing' for resume on next run.
+        await setRepoStatus(repoId, { last_error: err.message })
+        throw err
       }
+      logger.error(`File failed (${filePath}): ${err.message}`)
+      await recordFileError(repoId, `${filePath}: ${err.message}`)
+    }
+  }
+
+  if (skipped > 0) logger.info(`Skipped ${skipped} unchanged files in ${repo.full_name}.`)
+
+  await setRepoStatus(repoId, {
+    status: 'done',
+    last_processed_at: new Date().toISOString()
+  })
+}
+
+/**
+ * Returns repos that need work: status='processing' (interrupted runs) first,
+ * then status='pending' (newly upserted, not yet started). 'done' and 'failed'
+ * are skipped — failures stay sticky until something marks them pending again.
+ */
+async function findResumableRepos() {
+  const { data, error } = await supabase
+    .from('repos')
+    .select('id, repo_url, name, status')
+    .in('status', ['processing', 'pending'])
+  if (error) {
+    logger.error(`findResumableRepos error: ${error.message}`)
+    return []
+  }
+  // 'processing' first (interrupted runs take priority), then 'pending'.
+  return (data ?? []).sort((a, b) => (a.status === 'processing' ? -1 : 1))
+}
+
+/**
+ * Hydrates a DB repo row into the GitHub-shaped object processRepo expects.
+ */
+async function hydrateRepoFromDb(dbRepo) {
+  const { owner, name } = parseRepoUrl(dbRepo.repo_url)
+  return await fetchRepoDetails(owner, name)
+}
+
+async function main() {
+  const query = process.argv[2] || 'agent skills'
+  logger.info(`Starting pipeline (query: "${query}")`)
+
+  try {
+    // 1. Resume any repos that were left mid-flight.
+    const resumable = await findResumableRepos()
+    if (resumable.length > 0) {
+      logger.info(`Resuming ${resumable.length} repo(s) from previous runs.`)
+      for (const dbRepo of resumable) {
+        const repo = await hydrateRepoFromDb(dbRepo)
+        await processRepo(repo)
+      }
+    }
+
+    // 2. Fan out to GitHub search for new candidates.
+    const repos = await searchRepos(query)
+    logger.info(`Found ${repos.length} repositories from search.`)
+    for (const repo of repos) {
+      await processRepo(repo)
     }
 
     logger.info('Pipeline completed successfully.')
   } catch (error) {
+    if (error instanceof DailyQuotaExceededError) {
+      logger.error('Stopping pipeline — LLM daily quota exhausted. Re-run after reset.')
+      return
+    }
     logger.error('Pipeline failed:', error.message)
+    process.exitCode = 1
   }
 }
 

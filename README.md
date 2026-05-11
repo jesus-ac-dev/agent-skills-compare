@@ -250,5 +250,6 @@ Extrair entidades normalizadas.
 Pull requests são bem-vindos.
 Issues com ideias de use cases também.
 
-##📄 Licença
+## 📄 Licença
+
 Apache 2.0

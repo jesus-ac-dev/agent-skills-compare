@@ -1,0 +1,2 @@
+-- TRUNCATE analysis, files, sources, repos RESTART IDENTITY CASCADE;
+-- SELECT activities.name, COUNT(*) FROM analysis_activities JOIN activities ON activities.id = activity_id GROUP BY activities.name ORDER BY COUNT(*) DESC

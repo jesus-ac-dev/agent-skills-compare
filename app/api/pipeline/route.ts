@@ -22,9 +22,14 @@ export async function DELETE() {
 }
 
 export async function POST(req: NextRequest) {
-  const { query } = await req.json();
+  const body = await req.json();
+  const { query, resumeOnly } = body ?? {};
 
-  if (!query || typeof query !== 'string' || query.length < 1 || query.length > 200) {
+  if (resumeOnly) {
+    if (query) {
+      return NextResponse.json({ error: 'resumeOnly cannot be combined with query' }, { status: 400 });
+    }
+  } else if (!query || typeof query !== 'string' || query.length < 1 || query.length > 200) {
     return NextResponse.json({ error: 'Invalid query' }, { status: 400 });
   }
 
@@ -33,7 +38,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(current, { status: 409 });
   }
 
-  const run = startRun(query);
+  const run = startRun(resumeOnly ? { resumeOnly: true } : { query });
   return createStreamResponse(req, run);
 }
 

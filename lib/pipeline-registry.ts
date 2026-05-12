@@ -2,12 +2,23 @@ import { spawn, type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import path from 'path';
 
+// Path segments live outside spawn() and as separate string tokens so
+// Turbopack's static analyzer doesn't treat the literal "src/index.js"
+// as a server-relative import target.
+const PIPELINE_ENTRYPOINT = ['src', 'index.js'];
+
 interface PipelineRun {
   child: ChildProcess;
   query: string;
+  resumeOnly: boolean;
   startedAt: string;
   runId: string;
   emitter: EventEmitter;
+}
+
+export interface StartRunOptions {
+  query?: string;
+  resumeOnly?: boolean;
 }
 
 let currentRun: PipelineRun | null = null;
@@ -19,17 +30,26 @@ export function getStatus() {
   return {
     running: true,
     query: currentRun.query,
+    resumeOnly: currentRun.resumeOnly,
     startedAt: currentRun.startedAt,
     runId: currentRun.runId,
   };
 }
 
-export function startRun(query: string) {
+export function startRun(opts: StartRunOptions) {
   if (currentRun) {
     return currentRun;
   }
 
-  const child = spawn('node', [path.join(process.cwd(), 'src/index.js'), query], {
+  const scriptPath = path.join(process.cwd(), ...PIPELINE_ENTRYPOINT);
+  const childArgs: string[] = [scriptPath];
+  if (opts.resumeOnly) {
+    childArgs.push('--resume');
+  } else if (opts.query) {
+    childArgs.push(opts.query);
+  }
+
+  const child = spawn('node', childArgs, {
     cwd: process.cwd(),
     env: { ...process.env }
   });
@@ -37,7 +57,8 @@ export function startRun(query: string) {
 
   const run: PipelineRun = {
     child,
-    query,
+    query: opts.resumeOnly ? '(resume only)' : (opts.query ?? ''),
+    resumeOnly: !!opts.resumeOnly,
     startedAt: new Date().toISOString(),
     runId: Math.random().toString(36).substring(7),
     emitter,
@@ -81,8 +102,8 @@ export function cancelRun() {
     }, 5000);
 
     child.on('exit', () => clearTimeout(killTimer));
-
-    currentRun = null;
+    // currentRun is cleared by the exit handler in startRun, not here —
+    // a new run cannot be started while the previous child is still alive.
   }
 }
 

@@ -5,15 +5,22 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Play, XCircle, Trash2, Loader2, AlertCircle } from 'lucide-react';
+import { Play, XCircle, Trash2, Loader2, AlertCircle, RotateCw } from 'lucide-react';
+import { useResumable } from '@/lib/use-resumable';
 
 type RunStatus = 'idle' | 'running' | 'done (exit 0)' | 'failed' | 'cancelled' | 'quota-exceeded' | string;
 
 interface RunInfo {
   running: boolean;
   query?: string;
+  resumeOnly?: boolean;
   startedAt?: string;
   runId?: string;
+}
+
+interface StartStreamingOpts {
+  attach?: boolean;
+  payload?: { query?: string; resumeOnly?: boolean };
 }
 
 export default function RunPage() {
@@ -24,6 +31,7 @@ export default function RunPage() {
   const logContainerRef = useRef<HTMLPreElement>(null);
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const { count: resumableCount, refetch: refetchResumable } = useResumable();
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -33,7 +41,7 @@ export default function RunPage() {
         if (data.running) {
           setStatus('running');
           setQuery(data.query || '');
-          startStreaming(data.query || '', true);
+          startStreaming({ attach: true });
         }
       } catch (err) {
         console.error('Failed to check status:', err);
@@ -44,6 +52,7 @@ export default function RunPage() {
     return () => {
       abortControllerRef.current?.abort();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -52,17 +61,19 @@ export default function RunPage() {
     }
   }, [logs, isAutoScroll]);
 
-  const startStreaming = async (runQuery: string, isResume = false) => {
+  const startStreaming = async (opts: StartStreamingOpts) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     abortControllerRef.current = new AbortController();
 
+    const { attach = false, payload } = opts;
+
     try {
-      const response = await fetch(isResume ? '/api/pipeline?stream=1' : '/api/pipeline', {
-        method: isResume ? 'GET' : 'POST',
-        headers: isResume ? {} : { 'Content-Type': 'application/json' },
-        body: isResume ? null : JSON.stringify({ query: runQuery }),
+      const response = await fetch(attach ? '/api/pipeline?stream=1' : '/api/pipeline', {
+        method: attach ? 'GET' : 'POST',
+        headers: attach ? {} : { 'Content-Type': 'application/json' },
+        body: attach ? null : JSON.stringify(payload ?? {}),
         signal: abortControllerRef.current.signal,
       });
 
@@ -84,15 +95,20 @@ export default function RunPage() {
 
       const decoder = new TextDecoder();
       let exitCode = 0;
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const parts = chunk.split('\n\n');
+        buffer += decoder.decode(value, { stream: true });
 
-        for (const part of parts) {
+        let sep = buffer.indexOf('\n\n');
+        while (sep >= 0) {
+          const part = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          sep = buffer.indexOf('\n\n');
+
           if (part.startsWith('data: ')) {
             const data = part.slice(6);
             setLogs(prev => [...prev, data]);
@@ -114,6 +130,7 @@ export default function RunPage() {
         if (prev === 'quota-exceeded' || prev === 'cancelled' || prev === 'failed') return prev;
         return exitCode === 0 ? 'done (exit 0)' : `failed (exit ${exitCode})`;
       });
+      refetchResumable();
     } catch (err: any) {
       if (err.name === 'AbortError') {
         // Only set cancelled if we didn't just start a new one
@@ -127,7 +144,12 @@ export default function RunPage() {
   const handleRun = () => {
     if (!query.trim()) return;
     setLogs([]);
-    startStreaming(query);
+    startStreaming({ payload: { query } });
+  };
+
+  const handleResume = () => {
+    setLogs([]);
+    startStreaming({ payload: { resumeOnly: true } });
   };
 
   const handleCancel = async () => {
@@ -160,8 +182,33 @@ export default function RunPage() {
     return 'outline';
   };
 
+  const showResumeBanner =
+    resumableCount !== null && resumableCount > 0 && status !== 'running';
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {showResumeBanner && (
+        <Card className="bg-amber-50 border-amber-300">
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 mt-0.5 text-amber-700" />
+              <div>
+                <p className="text-sm font-medium text-amber-900">
+                  {resumableCount} repo{resumableCount === 1 ? '' : 's'} from a previous run still need processing.
+                </p>
+                <p className="text-xs text-amber-800/80">
+                  Resume picks up where the last run left off — no new GitHub search.
+                </p>
+              </div>
+            </div>
+            <Button onClick={handleResume} className="bg-amber-600 hover:bg-amber-700 text-white">
+              <RotateCw className="mr-2 h-4 w-4" />
+              Resume {resumableCount} repo{resumableCount === 1 ? '' : 's'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-2xl font-bold">Run Pipeline</CardTitle>
@@ -209,7 +256,7 @@ export default function RunPage() {
           <pre
             ref={logContainerRef}
             onScroll={handleScroll}
-            className="p-4 font-mono text-sm overflow-y-auto max-h-[60vh] whitespace-pre-wrap break-all"
+            className="p-4 font-mono text-sm overflow-y-auto max-h-[60vh] whitespace-pre-wrap break-words"
           >
             {logs.length === 0 ? (
               <span className="text-gray-500 italic">No logs to show...</span>

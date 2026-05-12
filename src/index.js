@@ -250,8 +250,16 @@ async function hydrateRepoFromDb(dbRepo) {
 }
 
 async function main() {
-  const query = process.argv[2] || 'agent skills'
-  logger.info(`Starting pipeline (query: "${query}")`)
+  const args = process.argv.slice(2)
+  const resumeOnly = args.includes('--resume')
+  const positional = args.filter((a) => !a.startsWith('--'))
+  const query = positional[0] || 'agent skills'
+
+  logger.info(
+    resumeOnly
+      ? 'Starting pipeline (resume-only mode — no new GitHub search).'
+      : `Starting pipeline (query: "${query}")`
+  )
 
   try {
     // 1. Resume any repos that were left mid-flight.
@@ -262,6 +270,13 @@ async function main() {
         const repo = await hydrateRepoFromDb(dbRepo)
         await processRepo(repo)
       }
+    } else if (resumeOnly) {
+      logger.info('No resumable repos found — nothing to do.')
+    }
+
+    if (resumeOnly) {
+      logger.info('Pipeline completed (resume-only).')
+      return
     }
 
     // 2. Fan out to GitHub search for new candidates.

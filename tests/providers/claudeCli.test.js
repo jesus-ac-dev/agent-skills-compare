@@ -69,6 +69,22 @@ describe('ClaudeCliProvider.analyzeContent', () => {
     )
   })
 
+  it('retries once when the response is missing required keys, then succeeds', async () => {
+    const incompleteResult = JSON.stringify({ summary: 'too short' })
+    const envelopeMissingKeys = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      result: incompleteResult
+    })
+    mockSpawn
+      .mockReturnValueOnce(fakeChild({ stdout: envelopeMissingKeys }))
+      .mockReturnValueOnce(fakeChild({ stdout: validEnvelope(sampleResult) }))
+    const provider = new ClaudeCliProvider()
+    const out = await provider.analyzeContent('c', 'p', { schema: {} })
+    expect(out).toEqual(sampleResult)
+    expect(mockSpawn).toHaveBeenCalledTimes(2)
+  })
+
   it('retries once when the inner JSON fails to parse, then succeeds', async () => {
     const badEnvelope = JSON.stringify({
       type: 'result',
@@ -129,6 +145,14 @@ describe('ClaudeCliProvider.healthCheck', () => {
     const provider = new ClaudeCliProvider()
     const result = await provider.healthCheck()
     expect(result).toEqual({ available: true })
+  })
+
+  it('returns available:false with reason when `claude --version` exits non-zero', async () => {
+    mockSpawn.mockReturnValueOnce(fakeChild({ stderr: 'something wrong', exitCode: 127 }))
+    const provider = new ClaudeCliProvider()
+    const result = await provider.healthCheck()
+    expect(result.available).toBe(false)
+    expect(result.reason).toMatch(/exited 127/)
   })
 
   it('returns available:false with reason when `claude` is missing', async () => {

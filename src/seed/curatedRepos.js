@@ -11,7 +11,7 @@ function normaliseGithubUrl(url) {
   if (!match) return null
   const owner = match[1].toLowerCase()
   const repo = match[2]
-  return `https://github.com/${owner}/${repo}`
+  return { repo_url: `https://github.com/${owner}/${repo}`, name: repo }
 }
 
 /**
@@ -59,9 +59,9 @@ export async function seedCuratedRepos() {
       invalid++
       continue
     }
-    if (seen.has(normalised)) continue
-    seen.add(normalised)
-    rows.push({ repo_url: normalised, status: 'pending' })
+    if (seen.has(normalised.repo_url)) continue
+    seen.add(normalised.repo_url)
+    rows.push({ repo_url: normalised.repo_url, name: normalised.name, status: 'pending' })
   }
 
   if (rows.length === 0) {

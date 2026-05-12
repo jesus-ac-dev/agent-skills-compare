@@ -76,7 +76,7 @@ describe('seedCuratedRepos', () => {
     expect(result.invalid).toBe(3)
     expect(result.inserted).toBe(1)
     expect(chain.upsert).toHaveBeenCalledWith(
-      [{ repo_url: 'https://github.com/anthropics/skills', status: 'pending' }],
+      [{ repo_url: 'https://github.com/anthropics/skills', name: 'skills', status: 'pending' }],
       { onConflict: 'repo_url', ignoreDuplicates: true }
     )
   })
@@ -120,8 +120,8 @@ describe('seedCuratedRepos', () => {
 
     const rows = chain.upsert.mock.calls[0][0]
     expect(rows).toEqual([
-      { repo_url: 'https://github.com/kilo-org/kilocode', status: 'pending' },
-      { repo_url: 'https://github.com/fission-ai/openspec', status: 'pending' }
+      { repo_url: 'https://github.com/kilo-org/kilocode', name: 'kilocode', status: 'pending' },
+      { repo_url: 'https://github.com/fission-ai/openspec', name: 'openspec', status: 'pending' }
     ])
   })
 })

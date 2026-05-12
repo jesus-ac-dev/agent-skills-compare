@@ -40,6 +40,9 @@ export default function RootLayout({
               <Link href="/stats" className="text-sm font-medium hover:underline">
                 Stats
               </Link>
+              <Link href="/run" className="text-sm font-medium hover:underline">
+                Run
+              </Link>
             </nav>
           </div>
         </header>

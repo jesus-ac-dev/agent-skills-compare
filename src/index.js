@@ -7,6 +7,7 @@ import { generateHash } from './utils/hash.js'
 import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
 import { resolveClosedId, upsertOpenId } from './db/lookups.js'
+import { seedCuratedRepos } from './seed/curatedRepos.js'
 
 async function setRepoStatus(repoId, patch) {
   const { error } = await supabase.from('repos').update(patch).eq('id', repoId)
@@ -264,7 +265,12 @@ async function main() {
   )
 
   try {
-    // 1. Resume any repos that were left mid-flight.
+    // 1. Seed the curated list (skipped in --resume mode per spec).
+    if (!resumeOnly) {
+      await seedCuratedRepos()
+    }
+
+    // 2. Resume any repos that were left mid-flight (includes freshly seeded pending rows).
     const resumable = await findResumableRepos()
     if (resumable.length > 0) {
       logger.info(`Resuming ${resumable.length} repo(s) from previous runs.`)
@@ -281,7 +287,7 @@ async function main() {
       return
     }
 
-    // 2. Fan out to GitHub search for new candidates.
+    // 3. Fan out to GitHub search for new candidates.
     const repos = await searchRepos(query)
     logger.info(`Found ${repos.length} repositories from search.`)
     for (const repo of repos) {

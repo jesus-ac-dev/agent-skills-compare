@@ -1,7 +1,7 @@
 import { searchRepos, fetchRepoDetails, parseRepoUrl } from './github/searchRepos.js'
 import { listFilesRecursive, filterRelevantFiles, fetchFile } from './github/fetchFiles.js'
 import { classifyProject } from './analysis/classifyProject.js'
-import { DailyQuotaExceededError } from './analysis/groqClient.js'
+import { GroqDailyQuotaError } from './analysis/providers/groqProvider.js'
 import { generateHash } from './utils/hash.js'
 import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
@@ -109,7 +109,7 @@ async function persistClassification(fileSourceId, payload) {
 }
 
 /**
- * Processes one repo. Throws DailyQuotaExceededError if the LLM daily quota
+ * Processes one repo. Throws GroqDailyQuotaError if the LLM daily quota
  * is exhausted mid-loop — the repo is left as 'processing' so the next run
  * resumes it.
  */
@@ -205,7 +205,7 @@ async function processRepo(repo) {
       const classification = await classifyProject(content)
       await persistClassification(fileSource.id, classification)
     } catch (err) {
-      if (err instanceof DailyQuotaExceededError) {
+      if (err instanceof GroqDailyQuotaError) {
         // Bubble up — repo stays 'processing' for resume on next run.
         await setRepoStatus(repoId, { last_error: err.message })
         throw err
@@ -288,7 +288,7 @@ async function main() {
 
     logger.info('Pipeline completed successfully.')
   } catch (error) {
-    if (error instanceof DailyQuotaExceededError) {
+    if (error instanceof GroqDailyQuotaError) {
       logger.error('Stopping pipeline — LLM daily quota exhausted. Re-run after reset.')
       return
     }

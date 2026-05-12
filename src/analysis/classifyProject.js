@@ -1,5 +1,8 @@
-import { analyzeContent } from './groqClient.js'
+// TEMPORARY shim (removed in Task 6 when the factory is wired in).
+import { GroqProvider } from './providers/groqProvider.js'
 import { loadClosedVocabulary } from '../db/lookups.js'
+const _groq = new GroqProvider()
+const analyzeContent = (...args) => _groq.analyzeContent(...args)
 
 function buildSystemPrompt({ classes, domains }) {
   return `You analyze a single file from a public repository that may contain AI agent skills,

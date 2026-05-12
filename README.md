@@ -23,29 +23,36 @@ Criar um sistema capaz de descobrir e catalogar "skills" e padrões agênticos r
 ## 🚀 Como Correr
 
 ### 1. Requisitos
+
 - Node.js 20+
 - Supabase (Local ou Cloud)
 - Groq API Key
 - GitHub Token (opcional, para evitar rate limits)
 
 ### 2. Setup
+
 ```bash
-npm install --legacy-peer-deps
+npm install
 cp .env.example .env # Configurar as chaves
 npm run db:reset     # Inicializar a BD (requer Supabase CLI)
 ```
 
 ### 3. Pipeline (Backend)
+
 Para pesquisar e analisar repositórios (ex.: "claude code skills"):
+
 ```bash
 npm start "claude code skills"
 ```
 
 ### 4. UI (Frontend)
+
 Para ver os resultados no browser:
+
 ```bash
 npm run dev
 ```
+
 Aceda a `http://localhost:3000`.
 
 ---
@@ -53,6 +60,7 @@ Aceda a `http://localhost:3000`.
 ## 🧱 Arquitetura e Taxonomia
 
 O sistema classifica cada ficheiro analisado em quatro eixos:
+
 - **Class:** O que é o artefacto (ex: `skill`, `subagent`, `mcp-server`)
 - **Domains:** Área de assunto (ex: `backend`, `security`, `data-ai`)
 - **Activities:** O que o agente faz (ex: `code-review`, `planning`, `debugging`)

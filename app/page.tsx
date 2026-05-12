@@ -26,7 +26,12 @@ export default function AnalysesPage() {
         .select('*')
 
       if (error) {
-        console.error('Error fetching analyses:', error)
+        console.error('Error fetching analyses:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        })
       } else {
         setAnalyses(data || [])
       }

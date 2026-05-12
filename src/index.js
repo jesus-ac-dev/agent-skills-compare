@@ -1,7 +1,7 @@
 import { searchRepos, fetchRepoDetails, parseRepoUrl } from './github/searchRepos.js'
 import { listFilesRecursive, filterRelevantFiles, fetchFile } from './github/fetchFiles.js'
 import { classifyProject } from './analysis/classifyProject.js'
-import { GroqDailyQuotaError } from './analysis/providers/groqProvider.js'
+import { ProviderQuotaError } from './analysis/providers/BaseProvider.js'
 import { getActiveProvider } from './analysis/providers/factory.js'
 import { generateHash } from './utils/hash.js'
 import logger from './utils/logger.js'
@@ -44,6 +44,7 @@ async function loadAnalyzedHashes(repoId) {
 }
 
 async function persistClassification(fileSourceId, payload) {
+  const provider = await getActiveProvider()
   const {
     summary,
     maturity,
@@ -67,7 +68,7 @@ async function persistClassification(fileSourceId, payload) {
         class_id: classId,
         maturity,
         score,
-        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
+        model: provider.name
       },
       { onConflict: 'file_source_id' }
     )
@@ -111,9 +112,9 @@ async function persistClassification(fileSourceId, payload) {
 }
 
 /**
- * Processes one repo. Throws GroqDailyQuotaError if the LLM daily quota
- * is exhausted mid-loop — the repo is left as 'processing' so the next run
- * resumes it.
+ * Processes one repo. Throws ProviderQuotaError if the active LLM provider
+ * runs out of quota mid-loop — the repo is left as 'processing' so the next
+ * run resumes it.
  */
 async function processRepo(repo) {
   logger.info(`Processing repository: ${repo.full_name}`)
@@ -207,7 +208,7 @@ async function processRepo(repo) {
       const classification = await classifyProject(content)
       await persistClassification(fileSource.id, classification)
     } catch (err) {
-      if (err instanceof GroqDailyQuotaError) {
+      if (err instanceof ProviderQuotaError) {
         // Bubble up — repo stays 'processing' for resume on next run.
         await setRepoStatus(repoId, { last_error: err.message })
         throw err
@@ -296,8 +297,10 @@ async function main() {
 
     logger.info('Pipeline completed successfully.')
   } catch (error) {
-    if (error instanceof GroqDailyQuotaError) {
-      logger.error('Stopping pipeline — LLM daily quota exhausted. Re-run after reset.')
+    if (error instanceof ProviderQuotaError) {
+      logger.error(
+        `Stopping pipeline — provider quota exhausted: ${error.message}. Re-run after reset.`
+      )
       return
     }
     logger.error('Pipeline failed:', error.message)

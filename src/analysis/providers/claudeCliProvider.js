@@ -1,7 +1,7 @@
 // src/analysis/providers/claudeCliProvider.js
 import { spawn } from 'child_process'
 import logger from '../../utils/logger.js'
-import { BaseProvider } from './BaseProvider.js'
+import { BaseProvider, ProviderQuotaError } from './BaseProvider.js'
 
 const QUOTA_REGEX = /rate.?limit|usage.?limit|weekly.?limit|too many/i
 const REQUIRED_KEYS = [
@@ -22,7 +22,7 @@ export class ClaudeCliError extends Error {
   }
 }
 
-export class ClaudeCliQuotaError extends ClaudeCliError {
+export class ClaudeCliQuotaError extends ProviderQuotaError {
   constructor(message) {
     super(message)
     this.name = 'ClaudeCliQuotaError'

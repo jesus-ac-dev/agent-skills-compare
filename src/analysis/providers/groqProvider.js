@@ -2,7 +2,7 @@
 import Groq from 'groq-sdk'
 import dotenv from 'dotenv'
 import logger from '../../utils/logger.js'
-import { BaseProvider } from './BaseProvider.js'
+import { BaseProvider, ProviderQuotaError } from './BaseProvider.js'
 
 dotenv.config()
 
@@ -15,7 +15,7 @@ const DAILY_WAIT_BUFFER_MS = 10_000
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-export class GroqDailyQuotaError extends Error {
+export class GroqDailyQuotaError extends ProviderQuotaError {
   constructor(message) {
     super(message)
     this.name = 'GroqDailyQuotaError'

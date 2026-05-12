@@ -52,7 +52,7 @@ export function ProviderSelect() {
     : 'Switch active LLM (applies next run)'
   const triggerContent = (
     <>
-      Provider: {LABELS[current]} {running ? '(locked)' : '▾'}
+      Provider: {LABELS[current] ?? current} {running ? '(locked)' : '▾'}
     </>
   )
 

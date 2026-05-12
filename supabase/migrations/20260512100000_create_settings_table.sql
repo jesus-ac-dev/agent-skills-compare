@@ -13,6 +13,7 @@ BEGIN
   RETURN NEW;
 END $$;
 
+DROP TRIGGER IF EXISTS settings_set_updated_at ON "public"."settings";
 CREATE TRIGGER settings_set_updated_at
   BEFORE UPDATE ON "public"."settings"
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();

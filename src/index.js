@@ -266,12 +266,35 @@ async function main() {
   )
 
   try {
-    // 1. Seed the curated list (skipped in --resume mode per spec).
+    // 1. Seed the curated list and process it FIRST (skipped in --resume mode).
+    //    Priority over older pending/processing rows from previous runs.
+    let curatedUrls = []
     if (!resumeOnly) {
-      await seedCuratedRepos()
+      ;({ curatedUrls } = await seedCuratedRepos())
     }
 
-    // 2. Resume any repos that were left mid-flight (includes freshly seeded pending rows).
+    if (curatedUrls.length > 0) {
+      const { data: curatedRows } = await supabase
+        .from('repos')
+        .select('id, repo_url, name, status')
+        .in('repo_url', curatedUrls)
+        .in('status', ['pending', 'processing'])
+
+      if (curatedRows && curatedRows.length > 0) {
+        // Preserve JSON declaration order (curated #1 in the file goes first).
+        const orderMap = new Map(curatedUrls.map((u, i) => [u, i]))
+        const ordered = [...curatedRows].sort(
+          (a, b) => orderMap.get(a.repo_url) - orderMap.get(b.repo_url)
+        )
+        logger.info(`Processing ${ordered.length} curated repo(s) with priority.`)
+        for (const dbRepo of ordered) {
+          const repo = await hydrateRepoFromDb(dbRepo)
+          await processRepo(repo)
+        }
+      }
+    }
+
+    // 2. Resume any other repos that were left mid-flight (non-curated pending/processing).
     const resumable = await findResumableRepos()
     if (resumable.length > 0) {
       logger.info(`Resuming ${resumable.length} repo(s) from previous runs.`)

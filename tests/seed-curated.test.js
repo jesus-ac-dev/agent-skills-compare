@@ -35,7 +35,7 @@ describe('seedCuratedRepos', () => {
 
     const result = await seedCuratedRepos()
 
-    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0 })
+    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0, curatedUrls: [] })
     expect(mockLoggerWarn).toHaveBeenCalledWith(expect.stringMatching(/curated-repos\.json/i))
     expect(mockSupabase.from).not.toHaveBeenCalled()
   })
@@ -52,7 +52,7 @@ describe('seedCuratedRepos', () => {
 
     const result = await seedCuratedRepos()
 
-    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0 })
+    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0, curatedUrls: [] })
     expect(mockSupabase.from).not.toHaveBeenCalled()
   })
 
@@ -97,7 +97,12 @@ describe('seedCuratedRepos', () => {
 
     const result = await seedCuratedRepos()
 
-    expect(result).toEqual({ inserted: 2, skipped: 1, invalid: 0 })
+    expect(result).toEqual({
+      inserted: 2,
+      skipped: 1,
+      invalid: 0,
+      curatedUrls: ['https://github.com/a/b', 'https://github.com/c/d', 'https://github.com/e/f']
+    })
     expect(mockSupabase.from).toHaveBeenCalledWith('repos')
     expect(chain.upsert).toHaveBeenCalledTimes(1)
     expect(chain.upsert.mock.calls[0][1]).toEqual({

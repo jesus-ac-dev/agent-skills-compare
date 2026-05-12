@@ -1,0 +1,62 @@
+[
+  {
+    "url": "https://github.com/anthropics/skills",
+    "reason": "Official — source of truth for Agent Skills"
+  },
+  {
+    "url": "https://github.com/mattpocock/skills",
+    "reason": "Skills for Real Engineers (Matt Pocock)"
+  },
+  {
+    "url": "https://github.com/addyosmani/agent-skills",
+    "reason": "Production-grade engineering skills for AI coding agents"
+  },
+  {
+    "url": "https://github.com/forrestchang/andrej-karpathy-skills",
+    "reason": "CLAUDE.md derived from Andrej Karpathy's observations on LLM coding pitfalls"
+  },
+  {
+    "url": "https://github.com/safishamsi/graphify",
+    "reason": "Knowledge-graph skill — turn any folder into a queryable graph"
+  },
+  {
+    "url": "https://github.com/cline/cline",
+    "reason": "Autonomous coding agent inside the IDE — system prompts and tool definitions live in code"
+  },
+  {
+    "url": "https://github.com/Kilo-Org/kilocode",
+    "reason": "All-in-one agentic engineering platform — heavy .ts/.js"
+  },
+  {
+    "url": "https://github.com/langchain-ai/open-swe",
+    "reason": "Open-source async coding agent"
+  },
+  {
+    "url": "https://github.com/paperclipai/paperclip",
+    "reason": "Open-source orchestration for zero-human companies"
+  },
+  {
+    "url": "https://github.com/openclaw/openclaw",
+    "reason": "Personal AI assistant — agent loop in code"
+  },
+  {
+    "url": "https://github.com/nousresearch/hermes-agent",
+    "reason": "NousResearch's agent platform"
+  },
+  {
+    "url": "https://github.com/davila7/claude-code-templates",
+    "reason": "CLI tool for configuring and monitoring Claude Code"
+  },
+  {
+    "url": "https://github.com/gsd-build/get-shit-done",
+    "reason": "Meta-prompting and context-engineering system (TÂCHES)"
+  },
+  {
+    "url": "https://github.com/Fission-AI/openspec",
+    "reason": "Spec-driven development for AI coding assistants"
+  },
+  {
+    "url": "https://github.com/microsoft/vscode-chat-customizations-evaluation",
+    "reason": "Microsoft's eval rig for chat customizations"
+  }
+]

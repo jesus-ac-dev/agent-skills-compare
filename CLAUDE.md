@@ -11,11 +11,16 @@ Pipeline Node.js (ESM) que descobre repos GitHub com artefactos agênticos (skil
 ```bash
 npm install
 npm test                       # vitest, 9 testes
-npm run lint                   # eslint (neostandard)
+npm run lint                   # eslint (cobre .js e .tsx)
+npm run verify:ui              # tsc --noEmit && eslint (NÃO toca em .next/ — safe com dev a correr)
 npm run db:reset               # aplica todas as migrations num Supabase local
-npm run db:push                # aplica só as pendentes
+npm run db:push                # aplica só as pendentes (cloud — local usa `supabase migration up`)
 npm start "agent skills"       # corre o pipeline para a query
+npm start "" -- --resume       # só processa repos com status processing/pending, sem search nova
+npm run dev                    # arranca a UI Next.js em http://localhost:3000
 ```
+
+**⚠️ Nunca correr `npm run build` enquanto `npm run dev` está activo** — sobrepõe o `.next/` e o dev server passa a responder 500 a tudo até reiniciar. Para validar o código UI com o dev activo, usa `npm run verify:ui` (typecheck + lint, sem build).
 
 Requer `.env` com `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, `GITHUB_TOKEN` (opcional mas recomendado). Ver [.env.example](.env.example).
 

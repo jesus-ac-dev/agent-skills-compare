@@ -2,6 +2,7 @@ import { searchRepos, fetchRepoDetails, parseRepoUrl } from './github/searchRepo
 import { listFilesRecursive, filterRelevantFiles, fetchFile } from './github/fetchFiles.js'
 import { classifyProject } from './analysis/classifyProject.js'
 import { GroqDailyQuotaError } from './analysis/providers/groqProvider.js'
+import { getActiveProvider } from './analysis/providers/factory.js'
 import { generateHash } from './utils/hash.js'
 import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
@@ -255,10 +256,11 @@ async function main() {
   const positional = args.filter((a) => !a.startsWith('--'))
   const query = positional[0] || 'agent skills'
 
+  const provider = await getActiveProvider()
   logger.info(
     resumeOnly
-      ? 'Starting pipeline (resume-only mode — no new GitHub search).'
-      : `Starting pipeline (query: "${query}")`
+      ? `Starting pipeline (resume-only mode — no new GitHub search; provider: ${provider.name})`
+      : `Starting pipeline (query: "${query}", provider: ${provider.name})`
   )
 
   try {

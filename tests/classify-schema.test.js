@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { buildClassifyResponseSchema } from '../src/analysis/classifyProject.js'
+
+vi.mock('../src/analysis/providers/factory.js', () => ({
+  getActiveProvider: vi.fn().mockResolvedValue({
+    analyzeContent: vi.fn().mockResolvedValue({})
+  })
+}))
 
 describe('buildClassifyResponseSchema', () => {
   it('produces a schema with closed enums for class and domains', () => {

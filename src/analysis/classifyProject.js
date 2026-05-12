@@ -1,8 +1,5 @@
-// TEMPORARY shim (removed in Task 6 when the factory is wired in).
-import { GroqProvider } from './providers/groqProvider.js'
+import { getActiveProvider } from './providers/factory.js'
 import { loadClosedVocabulary } from '../db/lookups.js'
-const _groq = new GroqProvider()
-const analyzeContent = (...args) => _groq.analyzeContent(...args)
 
 function buildSystemPrompt({ classes, domains }) {
   return `You analyze a single file from a public repository that may contain AI agent skills,
@@ -76,14 +73,17 @@ export function buildClassifyResponseSchema({ classes, domains }) {
 }
 
 /**
- * Classifies a file with one structured LLM call (Groq, Llama 3.3 70B by default).
- * Returns { summary, maturity, score, class, domains[], activities[], tags[], use_cases[] }.
+ * Classifies a file with one structured LLM call.
+ * The provider (Groq, Gemini, or Claude CLI) is chosen at pipeline startup
+ * from settings.llm_provider via the factory; classifyProject just resolves
+ * the cached instance and delegates.
  */
 export async function classifyProject(content) {
   const vocab = await loadClosedVocabulary()
   const schema = buildClassifyResponseSchema(vocab)
   const prompt = buildSystemPrompt(vocab)
-  return await analyzeContent(content, prompt, {
+  const provider = await getActiveProvider()
+  return await provider.analyzeContent(content, prompt, {
     schema,
     temperature: 0.4
   })

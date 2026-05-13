@@ -1,18 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { supabase } from '../db/supabaseClient.js'
 import logger from '../utils/logger.js'
+import { normaliseGithubUrl } from '../utils/githubUrl.js'
 
 const CONFIG_PATH = new URL('../../config/curated-repos.json', import.meta.url)
-
-const GITHUB_URL_RE = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)\/?$/
-
-function normaliseGithubUrl(url) {
-  const match = GITHUB_URL_RE.exec(url)
-  if (!match) return null
-  const owner = match[1].toLowerCase()
-  const repo = match[2]
-  return { repo_url: `https://github.com/${owner}/${repo}`, name: repo }
-}
 
 /**
  * Seed the `repos` table with curated URLs that may not surface from search.

@@ -4,6 +4,7 @@ import "./globals.css";
 import Link from "next/link";
 import { ResumableBadge } from "@/components/resumable-badge";
 import { ProviderSelect } from "@/components/provider-select";
+import { RepoAdd } from "@/components/repo-add";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,6 +37,7 @@ export default function RootLayout({
               Agentic Explorer
             </Link>
             <nav className="flex items-center gap-6">
+              <RepoAdd />
               <ProviderSelect />
               <Link href="/" className="text-sm font-medium hover:underline">
                 Analyses

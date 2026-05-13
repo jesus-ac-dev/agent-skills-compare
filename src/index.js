@@ -8,6 +8,7 @@ import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
 import { resolveClosedId, upsertOpenId } from './db/lookups.js'
 import { seedCuratedRepos } from './seed/curatedRepos.js'
+import { detectFileKind, detectFileTypeName } from './utils/fileKind.js'
 
 async function setRepoStatus(repoId, patch) {
   const { error } = await supabase.from('repos').update(patch).eq('id', repoId)
@@ -221,10 +222,9 @@ export async function processRepo(repo) {
       }
 
       logger.info(`Processing file: ${filePath}`)
-      const fileTypeId = await resolveClosedId(
-        'file_types',
-        filePath.endsWith('.md') ? 'markdown' : 'text'
-      )
+      const fileTypeName = detectFileTypeName(filePath)
+      const fileKind = detectFileKind(filePath)
+      const fileTypeId = await resolveClosedId('file_types', fileTypeName)
 
       const { data: fileSource, error: fsError } = await supabase
         .from('files_sources')
@@ -252,7 +252,10 @@ export async function processRepo(repo) {
         await persistClassification(fileSource.id, existingAnalysis)
         await supabase.from('files_sources').update({ status: 'reused' }).eq('id', fileSource.id)
       } else {
-        const classification = await classifyProject(content)
+        const classification = await classifyProject(content, {
+          kind: fileKind,
+          path: filePath
+        })
         await persistClassification(fileSource.id, classification)
         await supabase.from('files_sources').update({ status: 'completed' }).eq('id', fileSource.id)
 

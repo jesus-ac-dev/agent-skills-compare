@@ -117,6 +117,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   // fresh analyses.
   const [runState, setRunState] = useState<'idle' | 'starting' | 'running' | 'busy-other'>('idle')
   const [runError, setRunError] = useState<string | null>(null)
+  const [runLogs, setRunLogs] = useState<string[]>([])
+  const [logsCollapsed, setLogsCollapsed] = useState(false)
 
   async function refreshRepoData() {
     const { data: repoData } = await supabase.from('repos').select('*').eq('id', id).single()
@@ -149,6 +151,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   async function handleRunThisRepo() {
     setRunState('starting')
     setRunError(null)
+    setRunLogs([])
+    setLogsCollapsed(false)
     try {
       const res = await fetch('/api/pipeline', {
         method: 'POST',
@@ -168,14 +172,31 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         throw new Error(data.error || `HTTP ${res.status}`)
       }
       setRunState('running')
-      // Drain the SSE stream just to keep the connection alive — we don't
-      // render logs here, we rely on the polling effect below to detect end.
+      // Consume the SSE stream and surface log lines so the user can see what
+      // the pipeline is doing without having to leave the page.
       const reader = res.body?.getReader()
       if (reader) {
         ;(async () => {
+          const decoder = new TextDecoder()
+          let buffer = ''
           while (true) {
-            const { done } = await reader.read()
+            const { done, value } = await reader.read()
             if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            let sep = buffer.indexOf('\n\n')
+            while (sep >= 0) {
+              const chunk = buffer.slice(0, sep)
+              buffer = buffer.slice(sep + 2)
+              sep = buffer.indexOf('\n\n')
+              if (chunk.startsWith('data: ')) {
+                const line = chunk.slice(6)
+                setRunLogs((prev) => [...prev, line])
+              } else if (chunk.startsWith('event: done')) {
+                setRunLogs((prev) => [...prev, '── pipeline finished ──'])
+              } else if (chunk.startsWith('event: error')) {
+                setRunLogs((prev) => [...prev, '── pipeline error ──'])
+              }
+            }
           }
         })()
       }
@@ -284,6 +305,44 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
       </div>
+
+      {(runState === 'running' || runLogs.length > 0) && (
+        <div className="border rounded-md bg-neutral-50">
+          <div className="flex items-center justify-between px-3 py-2 border-b text-sm">
+            <span className="font-medium">
+              Pipeline log{' '}
+              <span className="text-muted-foreground font-normal">
+                ({runLogs.length} line{runLogs.length === 1 ? '' : 's'})
+              </span>
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setLogsCollapsed((v) => !v)}
+                className="text-xs px-2 py-0.5 rounded border bg-white hover:bg-neutral-100"
+              >
+                {logsCollapsed ? 'Show' : 'Hide'}
+              </button>
+              {runState !== 'running' && (
+                <button
+                  type="button"
+                  onClick={() => setRunLogs([])}
+                  className="text-xs px-2 py-0.5 rounded border bg-white hover:bg-neutral-100"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          {!logsCollapsed && (
+            <pre className="p-3 text-xs font-mono whitespace-pre-wrap max-h-72 overflow-auto">
+              {runLogs.length === 0
+                ? '(waiting for output…)'
+                : runLogs.join('\n')}
+            </pre>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 text-xs">
         <span className="text-muted-foreground self-center mr-1">Files:</span>

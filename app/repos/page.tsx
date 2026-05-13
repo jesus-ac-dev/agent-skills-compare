@@ -19,6 +19,7 @@ type Repo = {
   id: number
   name: string
   repo_url: string
+  avatar_url: string | null
   status: string
   stars: number | null
   error_count: number | null
@@ -166,11 +167,25 @@ export default function ReposListPage() {
             {filtered.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="font-medium">
-                  <Link href={`/repos/${r.id}`} className="text-blue-600 hover:underline">
-                    {r.name}
-                  </Link>
-                  <div className="text-xs text-muted-foreground truncate max-w-[300px]">
-                    {r.repo_url}
+                  <div className="flex items-center gap-2">
+                    {r.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={r.avatar_url}
+                        alt=""
+                        className="w-6 h-6 rounded-full bg-neutral-200 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-6 h-6 rounded-full bg-neutral-200 shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <Link href={`/repos/${r.id}`} className="text-blue-600 hover:underline">
+                        {r.name}
+                      </Link>
+                      <div className="text-xs text-muted-foreground truncate max-w-[280px]">
+                        {r.repo_url}
+                      </div>
+                    </div>
                   </div>
                 </TableCell>
                 <TableCell>

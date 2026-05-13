@@ -28,6 +28,7 @@
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/supabase/types.ts",
+    "db:health": "node scripts/db-health.mjs",
     "prepare": "husky"
   },
   "dependencies": {

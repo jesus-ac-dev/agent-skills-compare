@@ -8,6 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 
 const STATUS_ORDER = ['completed', 'reused', 'skipped', 'pending', 'processing', 'error'] as const
+// Always shown in the filter row even when count is 0. The rest only appear
+// when they have entries — keeps the bar tight on the common case.
+const PRIMARY_FILTERS = new Set<string>(['pending'])
 const STATUS_COLOURS: Record<string, string> = {
   completed: 'bg-green-100 text-green-800 border-green-200',
   reused: 'bg-blue-100 text-blue-800 border-blue-200',
@@ -384,21 +387,19 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             >
               all ({files.length})
             </button>
-            {analyzedCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setFileStatusFilter('analyzed')}
-                className={`px-2 py-1 rounded border ${
-                  fileStatusFilter === 'analyzed'
-                    ? 'bg-green-100 text-green-800 border-green-200 ring-2 ring-offset-1 ring-neutral-400'
-                    : 'bg-green-100 text-green-800 border-green-200 opacity-70 hover:opacity-100'
-                }`}
-                title="Files that have an analysis (completed or reused)"
-              >
-                analyzed ({analyzedCount})
-              </button>
-            )}
-            {STATUS_ORDER.filter((s) => statusCounts[s]).map((s) => (
+            <button
+              type="button"
+              onClick={() => setFileStatusFilter('analyzed')}
+              className={`px-2 py-1 rounded border ${
+                fileStatusFilter === 'analyzed'
+                  ? 'bg-green-100 text-green-800 border-green-200 ring-2 ring-offset-1 ring-neutral-400'
+                  : 'bg-green-100 text-green-800 border-green-200 opacity-70 hover:opacity-100'
+              }`}
+              title="Files that have an analysis (completed or reused)"
+            >
+              analyzed ({analyzedCount})
+            </button>
+            {STATUS_ORDER.filter((s) => PRIMARY_FILTERS.has(s) || statusCounts[s]).map((s) => (
               <button
                 key={s}
                 type="button"
@@ -409,7 +410,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                     : STATUS_COLOURS[s] + ' opacity-70 hover:opacity-100'
                 }`}
               >
-                {s} ({statusCounts[s]})
+                {s} ({statusCounts[s] ?? 0})
               </button>
             ))}
           </div>

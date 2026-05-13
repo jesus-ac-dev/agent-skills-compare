@@ -29,6 +29,7 @@
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/supabase/types.ts",
     "db:health": "node scripts/db-health.mjs",
+    "db:canonicalize": "node scripts/db-canonicalize.mjs",
     "prepare": "husky"
   },
   "dependencies": {

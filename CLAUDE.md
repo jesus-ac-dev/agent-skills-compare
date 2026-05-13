@@ -22,6 +22,8 @@ npm run dev                    # arranca a UI Next.js em http://localhost:3000
 
 **⚠️ Nunca correr `npm run build` enquanto `npm run dev` está activo** — sobrepõe o `.next/` e o dev server passa a responder 500 a tudo até reiniciar. Para validar o código UI com o dev activo, usa `npm run verify:ui` (typecheck + lint, sem build).
 
+**⚠️ Supabase CLI: este repo nunca está `link`ed.** Qualquer comando `supabase <cmd>` (migration list, db diff, status, etc.) precisa de `--local`, senão falha com "Cannot find project ref. Have you run supabase link?". Preferir os wrappers `npm run db:*` quando existirem. **Não correr** `supabase link` (liga ao cloud, não é o que queremos) nem `supabase db reset` sem confirmação explícita (é destrutivo).
+
 Requer `.env` com `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, `GITHUB_TOKEN` (opcional mas recomendado). Ver [.env.example](.env.example).
 
 ## Schema (estado actual — pós taxonomia v3)

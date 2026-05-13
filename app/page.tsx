@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { Suspense, useEffect, useState, useMemo } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
   Table,
@@ -14,24 +15,42 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import Link from 'next/link'
 
-export default function AnalysesPage() {
+type AxisFilter = { key: 'class' | 'domain' | 'activity' | 'tag'; value: string }
+
+function readAxisFilter(params: URLSearchParams): AxisFilter | null {
+  for (const key of ['class', 'domain', 'activity', 'tag'] as const) {
+    const value = params.get(key)
+    if (value) return { key, value }
+  }
+  return null
+}
+
+function AnalysesPageInner() {
+  const params = useSearchParams()
+  const axis = useMemo(
+    () => readAxisFilter(new URLSearchParams(params.toString())),
+    [params]
+  )
   const [analyses, setAnalyses] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
   useEffect(() => {
     async function fetchAnalyses() {
-      const { data, error } = await supabase
-        .from('analysis_with_axes')
-        .select('*')
-
+      setLoading(true)
+      let query = supabase.from('analysis_with_axes').select('*')
+      if (axis) {
+        if (axis.key === 'class') {
+          query = query.eq('class', axis.value)
+        } else {
+          // domains/activities/tags are text[] in the view → use contains
+          const column = `${axis.key}s` as const
+          query = query.contains(column, [axis.value])
+        }
+      }
+      const { data, error } = await query
       if (error) {
-        console.error('Error fetching analyses:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
-        })
+        console.error('Error fetching analyses:', error)
       } else {
         setAnalyses(data || [])
       }
@@ -39,7 +58,7 @@ export default function AnalysesPage() {
     }
 
     fetchAnalyses()
-  }, [])
+  }, [axis])
 
   const filteredAnalyses = useMemo(() => {
     return analyses.filter(a => {
@@ -61,6 +80,18 @@ export default function AnalysesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
         <h1 className="text-3xl font-bold">Analyses</h1>
+        {axis && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Filtered by</span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+              {axis.key}: {axis.value}
+              <Link href="/" className="ml-1 hover:underline" title="Clear filter">
+                ×
+              </Link>
+            </span>
+            <span className="text-muted-foreground">({analyses.length} match{analyses.length === 1 ? '' : 'es'})</span>
+          </div>
+        )}
         <Input
           placeholder="Search by repo, class, domain, activity or tag..."
           value={search}
@@ -116,5 +147,13 @@ export default function AnalysesPage() {
         </Table>
       </div>
     </div>
+  )
+}
+
+export default function AnalysesPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AnalysesPageInner />
+    </Suspense>
   )
 }

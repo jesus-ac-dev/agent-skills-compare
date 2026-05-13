@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -78,7 +79,9 @@ export function ProviderSelect() {
         {triggerContent}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel>Switch LLM provider</DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Switch LLM provider</DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         {(Object.keys(LABELS) as ProviderName[]).map((name) => {
           const isCurrent = name === current
@@ -108,9 +111,11 @@ export function ProviderSelect() {
           )
         })}
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          Applies to next run
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+            Applies to next run
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

@@ -153,30 +153,78 @@ async function persistClassification(fileSourceId, payload) {
 
 /**
  * Processes one repo.
+ *
+ * @param {object} repo - GitHub repo object (from fetchRepoDetails / searchRepos).
+ * @param {object} [options]
+ * @param {number} [options.existingRepoId] - DB id of a row that already
+ *   represents this repo. When provided, the function UPDATEs that row by id
+ *   instead of upserting by repo_url — important when GitHub has renamed the
+ *   owner, otherwise we'd create a duplicate row under the new URL while the
+ *   old one (with all its existing files_sources/analysis) becomes an orphan.
  */
-export async function processRepo(repo) {
+export async function processRepo(repo, options = {}) {
+  const { existingRepoId } = options
   logger.info(`Processing repository: ${repo.full_name}`)
 
-  const { data: dbRepo, error: repoError } = await supabase
-    .from('repos')
-    .upsert(
-      {
+  let repoId
+  // Base URL used to construct fileUrl for each file. We keep using the OLD
+  // (DB) URL when an existingRepoId is supplied so that urlToHash lookups
+  // continue to match previously-stored rows even if GitHub has renamed the
+  // canonical owner.
+  let baseRepoUrl
+
+  if (existingRepoId !== undefined) {
+    const { data: existing, error: existingErr } = await supabase
+      .from('repos')
+      .select('id, repo_url')
+      .eq('id', existingRepoId)
+      .single()
+    if (existingErr || !existing) {
+      logger.error(
+        `processRepo: no repo row with id=${existingRepoId} (${existingErr?.message ?? 'not found'})`
+      )
+      return
+    }
+    repoId = existing.id
+    baseRepoUrl = existing.repo_url
+
+    const { error: updateErr } = await supabase
+      .from('repos')
+      .update({
         name: repo.name,
-        repo_url: repo.html_url,
+        // repo_url intentionally NOT updated — see the function docs.
         avatar_url: repo.owner.avatar_url,
         stars: repo.stargazers_count,
         last_commit: repo.pushed_at
-      },
-      { onConflict: 'repo_url' }
-    )
-    .select('id')
-    .single()
+      })
+      .eq('id', repoId)
+    if (updateErr) {
+      logger.error(`Error updating repo ${repo.full_name}: ${updateErr.message}`)
+      return
+    }
+  } else {
+    const { data: dbRepo, error: repoError } = await supabase
+      .from('repos')
+      .upsert(
+        {
+          name: repo.name,
+          repo_url: repo.html_url,
+          avatar_url: repo.owner.avatar_url,
+          stars: repo.stargazers_count,
+          last_commit: repo.pushed_at
+        },
+        { onConflict: 'repo_url' }
+      )
+      .select('id')
+      .single()
 
-  if (repoError) {
-    logger.error(`Error saving repo ${repo.full_name}:`, repoError.message)
-    return
+    if (repoError) {
+      logger.error(`Error saving repo ${repo.full_name}:`, repoError.message)
+      return
+    }
+    repoId = dbRepo.id
+    baseRepoUrl = repo.html_url
   }
-  const repoId = dbRepo.id
 
   await setRepoStatus(repoId, {
     status: 'processing',
@@ -208,7 +256,7 @@ export async function processRepo(repo) {
   const skippedUrls = []
 
   for (const filePath of relevantFiles) {
-    const fileUrl = `${repo.html_url}/blob/${branch}/${filePath}`
+    const fileUrl = `${baseRepoUrl}/blob/${branch}/${filePath}`
     try {
       const content = await fetchFile(repo.owner.login, repo.name, filePath)
       if (!content) continue
@@ -351,7 +399,7 @@ async function main() {
         return
       }
       const repo = await hydrateRepoFromDb(dbRepo)
-      await processRepo(repo)
+      await processRepo(repo, { existingRepoId: dbRepo.id })
       logger.info('Single-repo run completed.')
       return
     }
@@ -376,7 +424,7 @@ async function main() {
         logger.info(`Processing ${ordered.length} curated repo(s) with priority.`)
         for (const dbRepo of ordered) {
           const repo = await hydrateRepoFromDb(dbRepo)
-          await processRepo(repo)
+          await processRepo(repo, { existingRepoId: dbRepo.id })
         }
       }
     }
@@ -386,7 +434,7 @@ async function main() {
       logger.info(`Resuming ${resumable.length} repo(s) from previous runs.`)
       for (const dbRepo of resumable) {
         const repo = await hydrateRepoFromDb(dbRepo)
-        await processRepo(repo)
+        await processRepo(repo, { existingRepoId: dbRepo.id })
       }
     } else if (resumeOnly) {
       logger.info('No resumable repos found — nothing to do.')

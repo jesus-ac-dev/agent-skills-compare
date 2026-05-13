@@ -89,13 +89,22 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     return counts
   }, [files])
 
-  // Filter on the Analyzed Files section. Defaults to 'completed' so the
-  // useful classifications show up first; 'all' shows everything.
-  const [fileStatusFilter, setFileStatusFilter] = useState<string>('completed')
+  // Filter on the Analyzed Files section. 'analyzed' is a virtual filter
+  // that combines completed + reused (files that have an analysis, either
+  // freshly classified or hash-matched). Defaults to 'analyzed' so the
+  // useful classifications show up by default regardless of whether they
+  // were just classified or kept from a previous run.
+  const [fileStatusFilter, setFileStatusFilter] = useState<string>('analyzed')
   const visibleFiles = useMemo(() => {
     if (fileStatusFilter === 'all') return files
+    if (fileStatusFilter === 'analyzed') {
+      return files.filter((f) => f.status === 'completed' || f.status === 'reused')
+    }
     return files.filter((f) => (f.status || 'pending') === fileStatusFilter)
   }, [files, fileStatusFilter])
+
+  const analyzedCount =
+    (statusCounts['completed'] ?? 0) + (statusCounts['reused'] ?? 0)
 
   async function handleReanalyze() {
     setUpdating(true)
@@ -375,6 +384,20 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             >
               all ({files.length})
             </button>
+            {analyzedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setFileStatusFilter('analyzed')}
+                className={`px-2 py-1 rounded border ${
+                  fileStatusFilter === 'analyzed'
+                    ? 'bg-green-100 text-green-800 border-green-200 ring-2 ring-offset-1 ring-neutral-400'
+                    : 'bg-green-100 text-green-800 border-green-200 opacity-70 hover:opacity-100'
+                }`}
+                title="Files that have an analysis (completed or reused)"
+              >
+                analyzed ({analyzedCount})
+              </button>
+            )}
             {STATUS_ORDER.filter((s) => statusCounts[s]).map((s) => (
               <button
                 key={s}

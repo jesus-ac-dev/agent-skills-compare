@@ -320,15 +320,19 @@ export async function processRepo(repo, options = {}) {
     }
   }
 
-  // Bulk update skipped files status (batching to avoid hitting limits)
+  // Bulk update files whose hash matched an existing analysis. These are
+  // "reused" (we kept the existing analysis instead of re-running the LLM) —
+  // semantically the same as the intra-run hashToAnalysis dedup path above.
   if (skippedUrls.length > 0) {
-    logger.info(`Skipped ${skippedCount} unchanged files in ${repo.full_name}.`)
+    logger.info(
+      `Reused existing analyses for ${skippedCount} unchanged files in ${repo.full_name}.`
+    )
     const batchSize = 100
     for (let i = 0; i < skippedUrls.length; i += batchSize) {
       const batch = skippedUrls.slice(i, i + batchSize)
       await supabase
         .from('files_sources')
-        .update({ status: 'skipped', last_checked: new Date().toISOString() })
+        .update({ status: 'reused', last_checked: new Date().toISOString() })
         .in('url', batch)
     }
   }

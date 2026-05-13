@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo, use } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -49,7 +50,15 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
 
       const { data: filesData } = await supabase
         .from('files_sources')
-        .select('*, analysis(*, classes(name))')
+        .select(
+          `*, analysis(
+            *,
+            classes(name),
+            analysis_domains(domains(name)),
+            analysis_activities(activities(name)),
+            analysis_tags(tags(name))
+          )`
+        )
         .eq('repo_id', id)
 
       setRepo(repoData)
@@ -142,11 +151,76 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                     {f.status || 'pending'}
                   </span>
                   {f.analysis?.classes?.name && (
-                    <Badge variant="outline">{f.analysis.classes.name}</Badge>
+                    <Link
+                      href={`/?class=${encodeURIComponent(f.analysis.classes.name)}`}
+                      title="Filter by this class"
+                    >
+                      <Badge
+                        variant="outline"
+                        className="cursor-pointer hover:bg-neutral-100"
+                      >
+                        {f.analysis.classes.name}
+                      </Badge>
+                    </Link>
                   )}
                 </div>
               </div>
               <CardDescription className="truncate">{f.url}</CardDescription>
+              {f.analysis && (
+                <div className="flex flex-wrap gap-1 pt-2">
+                  {(f.analysis.analysis_domains ?? []).map(
+                    (d: { domains: { name: string } }) =>
+                      d.domains?.name && (
+                        <Link
+                          key={`d-${d.domains.name}`}
+                          href={`/?domain=${encodeURIComponent(d.domains.name)}`}
+                          title="Filter by this domain"
+                        >
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] cursor-pointer hover:bg-neutral-200"
+                          >
+                            {d.domains.name}
+                          </Badge>
+                        </Link>
+                      )
+                  )}
+                  {(f.analysis.analysis_activities ?? []).map(
+                    (a: { activities: { name: string } }) =>
+                      a.activities?.name && (
+                        <Link
+                          key={`a-${a.activities.name}`}
+                          href={`/?activity=${encodeURIComponent(a.activities.name)}`}
+                          title="Filter by this activity"
+                        >
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] cursor-pointer hover:bg-neutral-100"
+                          >
+                            {a.activities.name}
+                          </Badge>
+                        </Link>
+                      )
+                  )}
+                  {(f.analysis.analysis_tags ?? []).map(
+                    (t: { tags: { name: string } }) =>
+                      t.tags?.name && (
+                        <Link
+                          key={`t-${t.tags.name}`}
+                          href={`/?tag=${encodeURIComponent(t.tags.name)}`}
+                          title="Filter by this tag"
+                        >
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] cursor-pointer hover:bg-blue-50 border-blue-200"
+                          >
+                            #{t.tags.name}
+                          </Badge>
+                        </Link>
+                      )
+                  )}
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               {f.analysis ? (

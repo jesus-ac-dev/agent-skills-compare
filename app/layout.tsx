@@ -42,6 +42,9 @@ export default function RootLayout({
               <Link href="/" className="text-sm font-medium hover:underline">
                 Analyses
               </Link>
+              <Link href="/repos" className="text-sm font-medium hover:underline">
+                Repos
+              </Link>
               <Link href="/stats" className="text-sm font-medium hover:underline">
                 Stats
               </Link>

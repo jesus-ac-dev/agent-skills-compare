@@ -23,7 +23,7 @@ export async function DELETE() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { query, resumeOnly, repoId } = body ?? {};
+  const { query, resumeOnly, repoId, force } = body ?? {};
 
   // Exactly one mode must be picked.
   const modes = [
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   let runOpts: Parameters<typeof startRun>[0];
-  if (typeof repoId === 'number') runOpts = { repoId };
+  if (typeof repoId === 'number') runOpts = { repoId, force: !!force };
   else if (resumeOnly) runOpts = { resumeOnly: true };
   else runOpts = { query };
 

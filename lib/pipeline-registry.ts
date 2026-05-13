@@ -21,6 +21,7 @@ export interface StartRunOptions {
   query?: string;
   resumeOnly?: boolean;
   repoId?: number;
+  force?: boolean;
 }
 
 let currentRun: PipelineRun | null = null;
@@ -48,6 +49,7 @@ export function startRun(opts: StartRunOptions) {
   const childArgs: string[] = [scriptPath];
   if (typeof opts.repoId === 'number') {
     childArgs.push(`--repo-id=${opts.repoId}`);
+    if (opts.force) childArgs.push('--force');
   } else if (opts.resumeOnly) {
     childArgs.push('--resume');
   } else if (opts.query) {

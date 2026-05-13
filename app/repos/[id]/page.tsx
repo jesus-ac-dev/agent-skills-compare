@@ -8,9 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 
 const STATUS_ORDER = ['completed', 'reused', 'skipped', 'pending', 'processing', 'error'] as const
-// Always shown in the filter row even when count is 0. The rest only appear
-// when they have entries — keeps the bar tight on the common case.
-const PRIMARY_FILTERS = new Set<string>(['pending'])
 const STATUS_COLOURS: Record<string, string> = {
   completed: 'bg-green-100 text-green-800 border-green-200',
   reused: 'bg-blue-100 text-blue-800 border-blue-200',
@@ -109,6 +106,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const analyzedCount =
     (statusCounts['completed'] ?? 0) + (statusCounts['reused'] ?? 0)
 
+  // Reanalyze (mark pending without running) — currently unused in the UI;
+  // /repos listing still calls the same Supabase pattern inline. Kept here
+  // in case we want to bring back a "queue for later" button.
   async function handleReanalyze() {
     setUpdating(true)
     const { error } = await supabase
@@ -160,7 +160,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     setFiles(accumulated)
   }
 
-  async function handleRunThisRepo() {
+  async function handleRunThisRepo(force = false) {
     setRunState('starting')
     setRunError(null)
     setRunLogs([])
@@ -169,7 +169,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
       const res = await fetch('/api/pipeline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoId: Number(id) })
+        body: JSON.stringify({ repoId: Number(id), force })
       })
       if (res.status === 409) {
         const data = await res.json().catch(() => ({}))
@@ -287,32 +287,42 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-1">
-          <div className="flex gap-2">
-            {repo.status !== 'pending' && repo.status !== 'processing' && (
-              <Button
-                onClick={handleReanalyze}
-                disabled={updating || runState === 'running' || runState === 'starting'}
-                variant="outline"
-              >
-                {updating ? 'Queuing…' : 'Re-analyze'}
-              </Button>
-            )}
-            <Button
-              onClick={handleRunThisRepo}
-              disabled={runState === 'starting' || runState === 'running' || runState === 'busy-other'}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-            >
-              {runState === 'running'
+          {(() => {
+            const pendingCount = statusCounts['pending'] ?? 0
+            const isForceMode = pendingCount === 0 && analyzedCount > 0
+            const busy =
+              runState === 'starting' || runState === 'running' || runState === 'busy-other'
+            const label =
+              runState === 'running'
                 ? '⏳ Running…'
                 : runState === 'starting'
                   ? 'Starting…'
-                  : '▶ Run this repo'}
-            </Button>
-          </div>
+                  : isForceMode
+                    ? `↻ Force re-analyze (${analyzedCount})`
+                    : `▶ Process ${pendingCount} pending`
+            return (
+              <Button
+                onClick={() => handleRunThisRepo(isForceMode)}
+                disabled={busy || (pendingCount === 0 && analyzedCount === 0)}
+                className={
+                  isForceMode
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-amber-600 hover:bg-amber-700 text-white'
+                }
+                title={
+                  isForceMode
+                    ? 'Re-classify every analyzed file (ignores hash cache)'
+                    : `Process the ${pendingCount} pending file(s) — analyzed files are kept`
+                }
+              >
+                {label}
+              </Button>
+            )
+          })()}
           {runError && <span className="text-xs text-red-700 max-w-xs text-right">{runError}</span>}
           {runState === 'idle' && (repo.status === 'pending' || repo.status === 'processing') && (
             <span className="text-xs text-muted-foreground">
-              Queued ({repo.status}) — click Run to process it now
+              Repo flagged as {repo.status} — will be picked up by the next /run too
             </span>
           )}
         </div>
@@ -378,17 +388,6 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           <div className="flex flex-wrap gap-1 text-xs">
             <button
               type="button"
-              onClick={() => setFileStatusFilter('all')}
-              className={`px-2 py-1 rounded border ${
-                fileStatusFilter === 'all'
-                  ? 'bg-neutral-900 text-white border-neutral-900'
-                  : 'bg-white hover:bg-neutral-50'
-              }`}
-            >
-              all ({files.length})
-            </button>
-            <button
-              type="button"
               onClick={() => setFileStatusFilter('analyzed')}
               className={`px-2 py-1 rounded border ${
                 fileStatusFilter === 'analyzed'
@@ -399,20 +398,30 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             >
               analyzed ({analyzedCount})
             </button>
-            {STATUS_ORDER.filter((s) => PRIMARY_FILTERS.has(s) || statusCounts[s]).map((s) => (
+            <button
+              type="button"
+              onClick={() => setFileStatusFilter('pending')}
+              className={`px-2 py-1 rounded border ${
+                fileStatusFilter === 'pending'
+                  ? STATUS_COLOURS.pending + ' ring-2 ring-offset-1 ring-neutral-400'
+                  : STATUS_COLOURS.pending + ' opacity-70 hover:opacity-100'
+              }`}
+            >
+              pending ({statusCounts['pending'] ?? 0})
+            </button>
+            {(statusCounts['error'] ?? 0) > 0 && (
               <button
-                key={s}
                 type="button"
-                onClick={() => setFileStatusFilter(s)}
+                onClick={() => setFileStatusFilter('error')}
                 className={`px-2 py-1 rounded border ${
-                  fileStatusFilter === s
-                    ? STATUS_COLOURS[s] + ' ring-2 ring-offset-1 ring-neutral-400'
-                    : STATUS_COLOURS[s] + ' opacity-70 hover:opacity-100'
+                  fileStatusFilter === 'error'
+                    ? STATUS_COLOURS.error + ' ring-2 ring-offset-1 ring-neutral-400'
+                    : STATUS_COLOURS.error + ' opacity-70 hover:opacity-100'
                 }`}
               >
-                {s} ({statusCounts[s] ?? 0})
+                error ({statusCounts['error']})
               </button>
-            ))}
+            )}
           </div>
         </div>
         {visibleFiles.length === 0 && (

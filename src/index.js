@@ -163,8 +163,8 @@ async function persistClassification(fileSourceId, payload) {
  *   old one (with all its existing files_sources/analysis) becomes an orphan.
  */
 export async function processRepo(repo, options = {}) {
-  const { existingRepoId } = options
-  logger.info(`Processing repository: ${repo.full_name}`)
+  const { existingRepoId, force = false } = options
+  logger.info(`Processing repository: ${repo.full_name}${force ? ' (force re-analyze)' : ''}`)
 
   let repoId
   // Base URL used to construct fileUrl for each file. We keep using the OLD
@@ -292,7 +292,12 @@ export async function processRepo(repo, options = {}) {
   const relevantFiles = filterRelevantFiles(allFiles)
   logger.info(`Found ${relevantFiles.length} relevant files in ${repo.full_name}.`)
 
-  const { urlToHash, hashToAnalysis } = await loadAnalyzedHashes(repoId)
+  // When force=true, skip the hash-cache load entirely so every file is
+  // re-classified by the active LLM (the user explicitly asked to ignore
+  // existing analyses).
+  const { urlToHash, hashToAnalysis } = force
+    ? { urlToHash: new Map(), hashToAnalysis: new Map() }
+    : await loadAnalyzedHashes(repoId)
   const sourceTypeId = await resolveClosedId('source_types', 'github_file')
   const branch = repo.default_branch || 'main'
 
@@ -413,6 +418,7 @@ async function hydrateRepoFromDb(dbRepo) {
 async function main() {
   const args = process.argv.slice(2)
   const resumeOnly = args.includes('--resume')
+  const force = args.includes('--force')
   const repoIdArg = args.find((a) => a.startsWith('--repo-id='))
   const onlyRepoId = repoIdArg ? Number(repoIdArg.slice('--repo-id='.length)) : null
   const positional = args.filter((a) => !a.startsWith('--'))
@@ -447,8 +453,8 @@ async function main() {
         return
       }
       const repo = await hydrateRepoFromDb(dbRepo)
-      await processRepo(repo, { existingRepoId: dbRepo.id })
-      logger.info('Single-repo run completed.')
+      await processRepo(repo, { existingRepoId: dbRepo.id, force })
+      logger.info(`Single-repo run completed${force ? ' (force re-analyze)' : ''}.`)
       return
     }
 

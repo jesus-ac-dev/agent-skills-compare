@@ -188,7 +188,16 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                   )}
                 </div>
               </div>
-              <CardDescription className="truncate">{f.url}</CardDescription>
+              <CardDescription className="truncate">
+                <a
+                  href={f.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-neutral-700 hover:underline"
+                >
+                  {f.url} ↗
+                </a>
+              </CardDescription>
               {f.analysis && (
                 <div className="flex flex-wrap gap-1 pt-2">
                   {(f.analysis.analysis_domains ?? []).map(
@@ -248,20 +257,50 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             <CardContent>
               {f.analysis ? (
                 <div className="space-y-4">
-                  <p>{f.analysis.summary}</p>
-                  <div>
-                    <h4 className="font-medium mb-2">Use Cases</h4>
-                    <ul className="list-disc pl-5 space-y-1">
-                      {f.analysis.use_cases?.map((uc: any, idx: number) => (
-                        <li key={idx}>
-                          <span className="font-semibold">{uc.title}:</span> {uc.description}
-                        </li>
-                      ))}
-                    </ul>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {typeof f.analysis.score === 'number' && (
+                      <span title="Score 0–10">★ {f.analysis.score.toFixed(1)}</span>
+                    )}
+                    {f.analysis.maturity && (
+                      <span
+                        className={
+                          f.analysis.maturity === 'stable'
+                            ? 'text-green-700'
+                            : f.analysis.maturity === 'abandoned'
+                              ? 'text-red-700'
+                              : 'text-amber-700'
+                        }
+                      >
+                        {f.analysis.maturity}
+                      </span>
+                    )}
+                    {f.analysis.model && (
+                      <span title="LLM that produced this analysis">via {f.analysis.model}</span>
+                    )}
                   </div>
+                  <p>{f.analysis.summary}</p>
+                  {f.analysis.use_cases?.length > 0 && (
+                    <div>
+                      <h4 className="font-medium mb-2">Use Cases</h4>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {f.analysis.use_cases.map((uc: any, idx: number) => (
+                          <li key={idx}>
+                            <span className="font-semibold">{uc.title}:</span> {uc.description}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <p className="text-muted-foreground italic">No analysis available for this file.</p>
+                <p className="text-muted-foreground italic">
+                  No analysis available for this file.
+                  {f.status === 'error' && f.last_checked && (
+                    <span className="block mt-1 text-xs text-red-700">
+                      Last attempt failed. Reanalyze to retry.
+                    </span>
+                  )}
+                </p>
               )}
             </CardContent>
           </Card>

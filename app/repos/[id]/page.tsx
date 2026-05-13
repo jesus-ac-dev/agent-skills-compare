@@ -1,10 +1,36 @@
 'use client'
 
-import { useEffect, useState, use } from 'react'
+import { useEffect, useState, useMemo, use } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+
+const STATUS_ORDER = ['completed', 'reused', 'skipped', 'pending', 'processing', 'error'] as const
+const STATUS_COLOURS: Record<string, string> = {
+  completed: 'bg-green-100 text-green-800 border-green-200',
+  reused: 'bg-blue-100 text-blue-800 border-blue-200',
+  skipped: 'bg-neutral-100 text-neutral-700 border-neutral-200',
+  pending: 'bg-amber-100 text-amber-800 border-amber-200',
+  processing: 'bg-amber-100 text-amber-800 border-amber-200',
+  error: 'bg-red-100 text-red-800 border-red-200'
+}
+
+function relativeTime(iso: string | null | undefined) {
+  if (!iso) return 'never'
+  const then = new Date(iso).getTime()
+  const diff = Date.now() - then
+  if (diff < 0) return 'in the future'
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min} min ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} h ago`
+  const days = Math.floor(hr / 24)
+  if (days < 30) return `${days} d ago`
+  const months = Math.floor(days / 30)
+  return `${months} mo ago`
+}
 
 export default function RepoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -34,6 +60,15 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     if (id) fetchData()
   }, [id])
 
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const f of files) {
+      const s = f.status || 'pending'
+      counts[s] = (counts[s] || 0) + 1
+    }
+    return counts
+  }, [files])
+
   async function handleReanalyze() {
     setUpdating(true)
     const { error } = await supabase
@@ -59,9 +94,15 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         <div>
           <h1 className="text-4xl font-bold">{repo.name}</h1>
           <p className="text-muted-foreground">{repo.repo_url}</p>
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2 flex items-center gap-3 text-sm">
             <Badge>{repo.status}</Badge>
-            <span className="text-sm">Stars: {repo.stars}</span>
+            <span>Stars: {repo.stars}</span>
+            <span className="text-muted-foreground">
+              Analyzed: {relativeTime(repo.last_processed_at)}
+            </span>
+            {repo.error_count > 0 && (
+              <span className="text-red-700">errors: {repo.error_count}</span>
+            )}
           </div>
         </div>
         <Button onClick={handleReanalyze} disabled={updating || repo.status === 'pending'}>
@@ -69,16 +110,41 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         </Button>
       </div>
 
+      <div className="flex flex-wrap gap-2 text-xs">
+        <span className="text-muted-foreground self-center mr-1">Files:</span>
+        {STATUS_ORDER.filter((s) => statusCounts[s]).map((s) => (
+          <span
+            key={s}
+            className={`px-2 py-0.5 rounded border ${STATUS_COLOURS[s]}`}
+            title={`${statusCounts[s]} ${s} file(s)`}
+          >
+            {statusCounts[s]} {s}
+          </span>
+        ))}
+        {Object.keys(statusCounts).length === 0 && (
+          <span className="text-muted-foreground italic">no files yet</span>
+        )}
+      </div>
+
       <div className="grid gap-6">
         <h2 className="text-2xl font-semibold">Analyzed Files</h2>
         {files.map((f) => (
           <Card key={f.id}>
             <CardHeader>
-              <div className="flex justify-between">
-                <CardTitle className="text-lg truncate max-w-[80%]">{f.path}</CardTitle>
-                {f.analysis?.classes?.name && (
-                   <Badge variant="outline">{f.analysis.classes.name}</Badge>
-                )}
+              <div className="flex justify-between items-start gap-2">
+                <CardTitle className="text-lg truncate max-w-[70%]">{f.path}</CardTitle>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                      STATUS_COLOURS[f.status || 'pending']
+                    }`}
+                  >
+                    {f.status || 'pending'}
+                  </span>
+                  {f.analysis?.classes?.name && (
+                    <Badge variant="outline">{f.analysis.classes.name}</Badge>
+                  )}
+                </div>
               </div>
               <CardDescription className="truncate">{f.url}</CardDescription>
             </CardHeader>

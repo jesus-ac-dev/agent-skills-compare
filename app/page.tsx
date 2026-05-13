@@ -25,6 +25,8 @@ function readAxisFilter(params: URLSearchParams): AxisFilter | null {
   return null
 }
 
+const PAGE_SIZE = 50
+
 function AnalysesPageInner() {
   const params = useSearchParams()
   const axis = useMemo(
@@ -32,33 +34,46 @@ function AnalysesPageInner() {
     [params]
   )
   const [analyses, setAnalyses] = useState<any[]>([])
+  const [total, setTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+
+  // Reset to first page when filter changes.
+  useEffect(() => {
+    setPage(0)
+  }, [axis])
 
   useEffect(() => {
     async function fetchAnalyses() {
       setLoading(true)
-      let query = supabase.from('analysis_with_axes').select('*')
-      if (axis) {
-        if (axis.key === 'class') {
-          query = query.eq('class', axis.value)
-        } else {
-          // domains/activities/tags are text[] in the view → use contains
-          const column = `${axis.key}s` as const
-          query = query.contains(column, [axis.value])
-        }
+      const applyAxis = (q: any) => {
+        if (!axis) return q
+        if (axis.key === 'class') return q.eq('class', axis.value)
+        return q.contains(`${axis.key}s`, [axis.value])
       }
-      const { data, error } = await query
-      if (error) {
-        console.error('Error fetching analyses:', error)
+
+      const from = page * PAGE_SIZE
+      const to = from + PAGE_SIZE - 1
+
+      const [rowsRes, countRes] = await Promise.all([
+        applyAxis(supabase.from('analysis_with_axes').select('*').range(from, to)),
+        applyAxis(
+          supabase.from('analysis_with_axes').select('*', { count: 'exact', head: true })
+        )
+      ])
+
+      if (rowsRes.error) {
+        console.error('Error fetching analyses:', rowsRes.error)
       } else {
-        setAnalyses(data || [])
+        setAnalyses(rowsRes.data ?? [])
       }
+      if (typeof countRes.count === 'number') setTotal(countRes.count)
       setLoading(false)
     }
 
     fetchAnalyses()
-  }, [axis])
+  }, [axis, page])
 
   const filteredAnalyses = useMemo(() => {
     return analyses.filter(a => {
@@ -146,6 +161,38 @@ function AnalysesPageInner() {
           </TableBody>
         </Table>
       </div>
+
+      {total !== null && total > PAGE_SIZE && !search && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))} ·{' '}
+            {total} total
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              className="px-3 py-1 rounded border bg-white hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Prev
+            </button>
+            <button
+              type="button"
+              disabled={(page + 1) * PAGE_SIZE >= total}
+              onClick={() => setPage((p) => p + 1)}
+              className="px-3 py-1 rounded border bg-white hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
+      {search && (
+        <p className="text-xs text-muted-foreground">
+          Text search filters the current page only — clear it to paginate the full result set.
+        </p>
+      )}
     </div>
   )
 }

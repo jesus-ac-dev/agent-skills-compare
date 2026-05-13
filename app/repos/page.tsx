@@ -182,8 +182,15 @@ export default function ReposListPage() {
                       <Link href={`/repos/${r.id}`} className="text-blue-600 hover:underline">
                         {r.name}
                       </Link>
-                      <div className="text-xs text-muted-foreground truncate max-w-[280px]">
-                        {r.repo_url}
+                      <div className="text-xs truncate max-w-[280px]">
+                        <a
+                          href={r.repo_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-neutral-700 hover:underline"
+                        >
+                          {r.repo_url} ↗
+                        </a>
                       </div>
                     </div>
                   </div>

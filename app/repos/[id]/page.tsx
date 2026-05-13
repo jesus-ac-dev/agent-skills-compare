@@ -99,22 +99,45 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-4xl font-bold">{repo.name}</h1>
-          <p className="text-muted-foreground">{repo.repo_url}</p>
-          <div className="mt-2 flex items-center gap-3 text-sm">
-            <Badge>{repo.status}</Badge>
-            <span>Stars: {repo.stars}</span>
-            <span className="text-muted-foreground">
-              Analyzed: {relativeTime(repo.last_processed_at)}
-            </span>
-            {repo.error_count > 0 && (
-              <span className="text-red-700">errors: {repo.error_count}</span>
-            )}
+      <div className="flex justify-between items-start gap-4">
+        <div className="flex items-start gap-4 min-w-0">
+          {repo.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={repo.avatar_url}
+              alt=""
+              className="w-16 h-16 rounded-full bg-neutral-200 shrink-0"
+            />
+          ) : (
+            <div className="w-16 h-16 rounded-full bg-neutral-200 shrink-0" />
+          )}
+          <div className="min-w-0">
+            <h1 className="text-4xl font-bold truncate">{repo.name}</h1>
+            <a
+              href={repo.repo_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted-foreground hover:text-neutral-700 hover:underline text-sm"
+            >
+              {repo.repo_url} ↗
+            </a>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+              <Badge>{repo.status}</Badge>
+              <span>Stars: {repo.stars}</span>
+              <span className="text-muted-foreground">
+                Analyzed: {relativeTime(repo.last_processed_at)}
+              </span>
+              {repo.error_count > 0 && (
+                <span className="text-red-700">errors: {repo.error_count}</span>
+              )}
+            </div>
           </div>
         </div>
-        <Button onClick={handleReanalyze} disabled={updating || repo.status === 'pending'}>
+        <Button
+          onClick={handleReanalyze}
+          disabled={updating || repo.status === 'pending'}
+          className="shrink-0"
+        >
           {repo.status === 'pending' ? 'Pending...' : 'Re-analyze Repo'}
         </Button>
       </div>

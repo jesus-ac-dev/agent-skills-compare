@@ -64,10 +64,17 @@ describe('upsertOpenId', () => {
 })
 
 describe('loadClosedVocabulary', () => {
-  it('returns sorted name lists for classes and domains', async () => {
+  it('returns sorted name lists for classes, domains and activities', async () => {
     const callMap = new Map([
       ['classes', { data: [{ name: 'skill' }, { name: 'agent' }], error: null }],
-      ['domains', { data: [{ name: 'backend' }, { name: 'data-ai' }], error: null }]
+      ['domains', { data: [{ name: 'backend' }, { name: 'data-ai' }], error: null }],
+      [
+        'activities',
+        {
+          data: [{ name: 'planning' }, { name: 'debugging' }, { name: 'code-review' }],
+          error: null
+        }
+      ]
     ])
     mockSupabase.from.mockImplementation((table) => {
       const chain = {
@@ -79,5 +86,24 @@ describe('loadClosedVocabulary', () => {
     const vocab = await loadClosedVocabulary()
     expect(vocab.classes).toEqual(['agent', 'skill'])
     expect(vocab.domains).toEqual(['backend', 'data-ai'])
+    expect(vocab.activities).toEqual(['code-review', 'debugging', 'planning'])
+  })
+
+  it('caps activities at 100 even when the DB has more', async () => {
+    const big = Array.from({ length: 250 }, (_, i) => ({
+      name: `activity-${String(i).padStart(3, '0')}`
+    }))
+    const callMap = new Map([
+      ['classes', { data: [], error: null }],
+      ['domains', { data: [], error: null }],
+      ['activities', { data: big, error: null }]
+    ])
+    mockSupabase.from.mockImplementation((table) => ({
+      select: vi.fn().mockResolvedValue(callMap.get(table))
+    }))
+
+    const vocab = await loadClosedVocabulary()
+    expect(vocab.activities).toHaveLength(100)
+    expect(vocab.activities[0]).toBe('activity-000')
   })
 })

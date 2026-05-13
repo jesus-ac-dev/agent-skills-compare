@@ -21,7 +21,18 @@ INSTRUCTS — the actual skill/workflow it conveys, not the writing style.`
 honestly if it has no analyzable content.`
 }
 
-function buildSystemPrompt({ classes, domains }, { kind = 'markdown', path = '' } = {}) {
+function buildSystemPrompt(
+  { classes, domains, activities = [] },
+  { kind = 'markdown', path = '' } = {}
+) {
+  const activitiesHint =
+    activities.length > 0
+      ? `\n- **PREFER existing activities** when they fit. Current vocabulary (most-used first):
+  ${activities.join(', ')}.
+  Only invent a new one for a genuinely novel concept that none of the above covers.
+  Use NOUN form (e.g. "analysis", not "analyzing"; "review", not "reviewing"). Singular over plural.`
+      : ''
+
   return `You analyze a single file from a public repository that may contain AI agent skills,
 sub-agents, MCP servers, plugins, prompts, hooks, or related artifacts. Classify it and return
 ONLY a single JSON object (no prose, no markdown fences) with EXACTLY these keys:
@@ -38,9 +49,10 @@ Field rules:
 - "class": pick EXACTLY ONE from this closed list — ${classes.join(', ')}.
 - "domains": array, 1+ entries, each MUST be from this closed list — ${domains.join(', ')}.
 - "activities": array, 1+ short kebab-case verbs/use-actions (e.g. "code-review", "planning",
-  "debugging", "documentation"). Free vocabulary, but stick to lowercase kebab-case.
+  "debugging", "documentation"). Free vocabulary, but stick to lowercase kebab-case.${activitiesHint}
 - "tags": array, 0+ free-form keywords (languages, frameworks, models, libraries:
-  "python", "react", "claude-code", "langchain", "postgres"). Lowercase.
+  "python", "react", "claude-code", "langchain", "postgres"). Lowercase. Prefer canonical forms
+  (e.g. "javascript" not "js"; "typescript" not "ts"; "artificial-intelligence" not "ai").
 - "use_cases": array, 1+ objects of shape {"title": string, "description": string}.
 
 Return ONLY the JSON object.`

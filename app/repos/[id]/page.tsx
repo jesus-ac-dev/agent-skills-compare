@@ -48,21 +48,32 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         .eq('id', id)
         .single()
 
-      const { data: filesData } = await supabase
-        .from('files_sources')
-        .select(
-          `*, analysis(
-            *,
-            classes(name),
-            analysis_domains(domains(name)),
-            analysis_activities(activities(name)),
-            analysis_tags(tags(name))
-          )`
-        )
-        .eq('repo_id', id)
+      // PostgREST caps a single SELECT at 1000 rows; for big repos
+      // (alirezarezvani/claude-skills has ~2800 files) the tail would
+      // silently vanish. Page through until we get a short page.
+      const pageSize = 1000
+      const accumulated: any[] = []
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase
+          .from('files_sources')
+          .select(
+            `*, analysis(
+              *,
+              classes(name),
+              analysis_domains(domains(name)),
+              analysis_activities(activities(name)),
+              analysis_tags(tags(name))
+            )`
+          )
+          .eq('repo_id', id)
+          .range(from, from + pageSize - 1)
+        if (error || !data || data.length === 0) break
+        accumulated.push(...data)
+        if (data.length < pageSize) break
+      }
 
       setRepo(repoData)
-      setFiles(filesData || [])
+      setFiles(accumulated)
       setLoading(false)
     }
 
@@ -77,6 +88,14 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     }
     return counts
   }, [files])
+
+  // Filter on the Analyzed Files section. Defaults to 'completed' so the
+  // useful classifications show up first; 'all' shows everything.
+  const [fileStatusFilter, setFileStatusFilter] = useState<string>('completed')
+  const visibleFiles = useMemo(() => {
+    if (fileStatusFilter === 'all') return files
+    return files.filter((f) => (f.status || 'pending') === fileStatusFilter)
+  }, [files, fileStatusFilter])
 
   async function handleReanalyze() {
     setUpdating(true)
@@ -159,8 +178,42 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
       </div>
 
       <div className="grid gap-6">
-        <h2 className="text-2xl font-semibold">Analyzed Files</h2>
-        {files.map((f) => (
+        <div className="flex justify-between items-center flex-wrap gap-3">
+          <h2 className="text-2xl font-semibold">Analyzed Files</h2>
+          <div className="flex flex-wrap gap-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setFileStatusFilter('all')}
+              className={`px-2 py-1 rounded border ${
+                fileStatusFilter === 'all'
+                  ? 'bg-neutral-900 text-white border-neutral-900'
+                  : 'bg-white hover:bg-neutral-50'
+              }`}
+            >
+              all ({files.length})
+            </button>
+            {STATUS_ORDER.filter((s) => statusCounts[s]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setFileStatusFilter(s)}
+                className={`px-2 py-1 rounded border ${
+                  fileStatusFilter === s
+                    ? STATUS_COLOURS[s] + ' ring-2 ring-offset-1 ring-neutral-400'
+                    : STATUS_COLOURS[s] + ' opacity-70 hover:opacity-100'
+                }`}
+              >
+                {s} ({statusCounts[s]})
+              </button>
+            ))}
+          </div>
+        </div>
+        {visibleFiles.length === 0 && (
+          <p className="text-muted-foreground italic">
+            No files with status &ldquo;{fileStatusFilter}&rdquo;.
+          </p>
+        )}
+        {visibleFiles.map((f) => (
           <Card key={f.id}>
             <CardHeader>
               <div className="flex justify-between items-start gap-2">

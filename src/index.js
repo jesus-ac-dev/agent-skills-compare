@@ -192,6 +192,7 @@ export async function processRepo(repo, options = {}) {
       .from('repos')
       .update({
         name: repo.name,
+        github_repo_id: repo.id ?? null,
         // repo_url intentionally NOT updated — see the function docs.
         avatar_url: repo.owner.avatar_url,
         stars: repo.stargazers_count,
@@ -203,27 +204,70 @@ export async function processRepo(repo, options = {}) {
       return
     }
   } else {
-    const { data: dbRepo, error: repoError } = await supabase
-      .from('repos')
-      .upsert(
-        {
+    // No DB id provided — search-discovered or curated. Match against
+    // existing rows by the stable github_repo_id first (survives renames),
+    // fall back to repo_url for legacy rows, INSERT only if neither match.
+    let matchedId = null
+
+    if (typeof repo.id === 'number') {
+      const { data: byGhId } = await supabase
+        .from('repos')
+        .select('id, repo_url')
+        .eq('github_repo_id', repo.id)
+        .maybeSingle()
+      if (byGhId) {
+        matchedId = byGhId.id
+        baseRepoUrl = byGhId.repo_url
+      }
+    }
+    if (matchedId === null) {
+      const { data: byUrl } = await supabase
+        .from('repos')
+        .select('id, repo_url')
+        .eq('repo_url', repo.html_url)
+        .maybeSingle()
+      if (byUrl) {
+        matchedId = byUrl.id
+        baseRepoUrl = byUrl.repo_url
+      }
+    }
+
+    if (matchedId !== null) {
+      const { error: updateErr } = await supabase
+        .from('repos')
+        .update({
           name: repo.name,
-          repo_url: repo.html_url,
+          github_repo_id: repo.id ?? null,
           avatar_url: repo.owner.avatar_url,
           stars: repo.stargazers_count,
           last_commit: repo.pushed_at
-        },
-        { onConflict: 'repo_url' }
-      )
-      .select('id')
-      .single()
-
-    if (repoError) {
-      logger.error(`Error saving repo ${repo.full_name}:`, repoError.message)
-      return
+        })
+        .eq('id', matchedId)
+      if (updateErr) {
+        logger.error(`Error updating repo ${repo.full_name}: ${updateErr.message}`)
+        return
+      }
+      repoId = matchedId
+    } else {
+      const { data: inserted, error: insertErr } = await supabase
+        .from('repos')
+        .insert({
+          name: repo.name,
+          repo_url: repo.html_url,
+          github_repo_id: repo.id ?? null,
+          avatar_url: repo.owner.avatar_url,
+          stars: repo.stargazers_count,
+          last_commit: repo.pushed_at
+        })
+        .select('id')
+        .single()
+      if (insertErr) {
+        logger.error(`Error saving repo ${repo.full_name}:`, insertErr.message)
+        return
+      }
+      repoId = inserted.id
+      baseRepoUrl = repo.html_url
     }
-    repoId = dbRepo.id
-    baseRepoUrl = repo.html_url
   }
 
   await setRepoStatus(repoId, {

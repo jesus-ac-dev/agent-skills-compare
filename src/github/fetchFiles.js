@@ -22,8 +22,15 @@ export async function fetchFile(owner, repo, path) {
   }
 
   try {
-    const response = await axios.get(url, { headers })
-    return response.data
+    // responseType:'text' + identity transformResponse prevents axios from
+    // auto-parsing JSON files (e.g. marketplace.json) into Objects, which
+    // would then break generateHash() expecting a string/Buffer.
+    const response = await axios.get(url, {
+      headers,
+      responseType: 'text',
+      transformResponse: [(data) => data]
+    })
+    return typeof response.data === 'string' ? response.data : String(response.data ?? '')
   } catch (error) {
     if (error.response?.status === 404) {
       logger.warn(`File not found: ${path} in ${owner}/${repo}`)

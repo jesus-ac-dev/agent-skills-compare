@@ -58,5 +58,9 @@
   {
     "url": "https://github.com/microsoft/vscode-chat-customizations-evaluation",
     "reason": "Microsoft's eval rig for chat customizations"
+  },
+  {
+    "url": "https://github.com/brobertsaz/claude-os",
+    "reason": "Every conversation makes Claude smarter. Every insight builds your shared knowledge"
   }
 ]

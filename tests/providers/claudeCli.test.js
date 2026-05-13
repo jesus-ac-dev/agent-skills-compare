@@ -137,6 +137,23 @@ describe('ClaudeCliProvider.analyzeContent', () => {
       ClaudeCliQuotaError
     )
   })
+
+  it('throws ClaudeCliQuotaError on exit≠0 with stdout envelope is_error + api_error_status 429', async () => {
+    // Real Claude CLI quota response: exit code 1, but the error envelope
+    // sits in stdout with subtype="success" + is_error=true + api_error_status=429.
+    const quotaStdout = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      api_error_status: 429,
+      result: "You've hit your limit · resets 1:40am (Europe/Lisbon)"
+    })
+    mockSpawn.mockReturnValueOnce(fakeChild({ stdout: quotaStdout, exitCode: 1 }))
+    const provider = new ClaudeCliProvider()
+    await expect(provider.analyzeContent('c', 'p', { schema: {} })).rejects.toBeInstanceOf(
+      ClaudeCliQuotaError
+    )
+  })
 })
 
 describe('ClaudeCliProvider.healthCheck', () => {

@@ -42,32 +42,13 @@ Isto resolve a **Etapa 1** original (incremental vs refresh) na prática:
 - Depois de aplicar o fix do prompt, um run novo num repo grande não produz duplicados óbvios (gerund/noun, plural/singular).
 - Depois de correr `db:canonicalize` com um mapa razoável, a contagem em `activities` cai ≥ 20% sem perder informação (cada eliminado tem um destino canónico, todas as M2M são preservadas).
 
-### B. Lista curada de repos seed
+### ✅ B. Lista curada de repos seed (feito 2026-05-13)
 
-Igual ao plano original — processar `config/curated-repos.json` antes da pesquisa GitHub para garantir cobertura de repos canónicos (Anthropic oficiais, awesome-claude-code, etc.).
+Implementado em `src/seed/curatedRepos.js` + `config/curated-repos.json` (15 entries iniciais). O loader corre no arranque de `main()` antes do `findResumableRepos`, inserindo URLs novas com `status='pending'`. Idempotente via `ON CONFLICT DO NOTHING` (`ignoreDuplicates: true`) — re-runs não tocam em repos já processados. Skipped em modo `--resume`.
 
-`config/curated-repos.json`:
+Adicionar novos repos canónicos: editar `config/curated-repos.json` e correr `npm start` (com ou sem query). Reanalisar repos existentes continua a ser via `UPDATE repos SET status='pending' WHERE id=?` — a lista curada nunca sobrepõe estado existente.
 
-```json
-[
-  {
-    "url": "https://github.com/anthropics/claude-code",
-    "reason": "Oficial — fonte de verdade do Claude Code"
-  },
-  {
-    "url": "https://github.com/hesreallyhim/awesome-claude-code",
-    "reason": "Colecção comunitária canónica"
-  }
-]
-```
-
-Em `src/index.js`, antes do `searchRepos`:
-
-1. Carregar o JSON, dedupe por URL.
-2. Para cada entrada, `fetchRepoDetails(owner, name)` (já existe no `searchRepos.js`).
-3. Concatenar com `searchRepos(query)`, dedupe final por `repo_url`.
-
-A lista curada é processada mesmo se a query falhar (ex.: GitHub rate-limited) — garantia mínima.
+Spec: [docs/superpowers/specs/2026-05-12-curated-seed-repos-design.md](superpowers/specs/2026-05-12-curated-seed-repos-design.md).
 
 ### C. UI simples para ler os dados (sub-projecto)
 
@@ -105,7 +86,6 @@ Pequenas mas úteis quando a BD começar a crescer:
 1. (A1) Fix do prompt para canonicalização — 10 linhas, payoff imediato.
 2. (C) UI via Jules AI — desbloqueia produto real.
 3. (A2) Canonicalização retroactiva — quando houver dados suficientes para justificar.
-4. (B) Lista curada — quando quiseres garantir cobertura.
-5. (D) Operações de qualidade — só quando a dor aparecer.
+4. (D) Operações de qualidade — só quando a dor aparecer.
 
 Cada uma destas etapas merece o seu próprio brainstorming + spec + plano antes de implementar — o ciclo `superpowers:brainstorming → writing-plans → subagent-driven-development` deu bons frutos no v3.

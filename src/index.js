@@ -1,11 +1,13 @@
 import { searchRepos, fetchRepoDetails, parseRepoUrl } from './github/searchRepos.js'
 import { listFilesRecursive, filterRelevantFiles, fetchFile } from './github/fetchFiles.js'
 import { classifyProject } from './analysis/classifyProject.js'
-import { DailyQuotaExceededError } from './analysis/groqClient.js'
+import { GroqDailyQuotaError } from './analysis/providers/groqProvider.js'
+import { getActiveProvider } from './analysis/providers/factory.js'
 import { generateHash } from './utils/hash.js'
 import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
 import { resolveClosedId, upsertOpenId } from './db/lookups.js'
+import { seedCuratedRepos } from './seed/curatedRepos.js'
 
 async function setRepoStatus(repoId, patch) {
   const { error } = await supabase.from('repos').update(patch).eq('id', repoId)
@@ -109,7 +111,7 @@ async function persistClassification(fileSourceId, payload) {
 }
 
 /**
- * Processes one repo. Throws DailyQuotaExceededError if the LLM daily quota
+ * Processes one repo. Throws GroqDailyQuotaError if the LLM daily quota
  * is exhausted mid-loop — the repo is left as 'processing' so the next run
  * resumes it.
  */
@@ -205,7 +207,7 @@ async function processRepo(repo) {
       const classification = await classifyProject(content)
       await persistClassification(fileSource.id, classification)
     } catch (err) {
-      if (err instanceof DailyQuotaExceededError) {
+      if (err instanceof GroqDailyQuotaError) {
         // Bubble up — repo stays 'processing' for resume on next run.
         await setRepoStatus(repoId, { last_error: err.message })
         throw err
@@ -250,11 +252,25 @@ async function hydrateRepoFromDb(dbRepo) {
 }
 
 async function main() {
-  const query = process.argv[2] || 'agent skills'
-  logger.info(`Starting pipeline (query: "${query}")`)
+  const args = process.argv.slice(2)
+  const resumeOnly = args.includes('--resume')
+  const positional = args.filter((a) => !a.startsWith('--'))
+  const query = positional[0] || 'agent skills'
+
+  const provider = await getActiveProvider()
+  logger.info(
+    resumeOnly
+      ? `Starting pipeline (resume-only mode — no new GitHub search; provider: ${provider.name})`
+      : `Starting pipeline (query: "${query}", provider: ${provider.name})`
+  )
 
   try {
-    // 1. Resume any repos that were left mid-flight.
+    // 1. Seed the curated list (skipped in --resume mode per spec).
+    if (!resumeOnly) {
+      await seedCuratedRepos()
+    }
+
+    // 2. Resume any repos that were left mid-flight (includes freshly seeded pending rows).
     const resumable = await findResumableRepos()
     if (resumable.length > 0) {
       logger.info(`Resuming ${resumable.length} repo(s) from previous runs.`)
@@ -262,9 +278,16 @@ async function main() {
         const repo = await hydrateRepoFromDb(dbRepo)
         await processRepo(repo)
       }
+    } else if (resumeOnly) {
+      logger.info('No resumable repos found — nothing to do.')
     }
 
-    // 2. Fan out to GitHub search for new candidates.
+    if (resumeOnly) {
+      logger.info('Pipeline completed (resume-only).')
+      return
+    }
+
+    // 3. Fan out to GitHub search for new candidates.
     const repos = await searchRepos(query)
     logger.info(`Found ${repos.length} repositories from search.`)
     for (const repo of repos) {
@@ -273,7 +296,7 @@ async function main() {
 
     logger.info('Pipeline completed successfully.')
   } catch (error) {
-    if (error instanceof DailyQuotaExceededError) {
+    if (error instanceof GroqDailyQuotaError) {
       logger.error('Stopping pipeline — LLM daily quota exhausted. Re-run after reset.')
       return
     }

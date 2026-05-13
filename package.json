@@ -16,6 +16,7 @@
     "rank": "node src/analysis/ranking.js",
     "agent": "node Gemini/runtime/agent-loop.js",
     "verify": "npm run format && npm run test && npm run lint",
+    "verify:ui": "tsc --noEmit && eslint .",
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:coverage": "vitest --run --coverage",

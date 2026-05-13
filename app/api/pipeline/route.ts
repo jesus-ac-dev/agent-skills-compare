@@ -23,14 +23,23 @@ export async function DELETE() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { query, resumeOnly } = body ?? {};
+  const { query, resumeOnly, repoId } = body ?? {};
 
-  if (resumeOnly) {
-    if (query) {
-      return NextResponse.json({ error: 'resumeOnly cannot be combined with query' }, { status: 400 });
-    }
-  } else if (!query || typeof query !== 'string' || query.length < 1 || query.length > 200) {
-    return NextResponse.json({ error: 'Invalid query' }, { status: 400 });
+  // Exactly one mode must be picked.
+  const modes = [
+    typeof repoId === 'number' && Number.isFinite(repoId),
+    !!resumeOnly,
+    typeof query === 'string' && query.length > 0
+  ].filter(Boolean).length;
+  if (modes !== 1) {
+    return NextResponse.json(
+      { error: 'Pick exactly one of: repoId, resumeOnly, query.' },
+      { status: 400 }
+    );
+  }
+
+  if (typeof query === 'string' && (query.length < 1 || query.length > 200)) {
+    return NextResponse.json({ error: 'query length must be 1..200' }, { status: 400 });
   }
 
   const current = getStatus();
@@ -38,7 +47,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(current, { status: 409 });
   }
 
-  const run = startRun(resumeOnly ? { resumeOnly: true } : { query });
+  let runOpts: Parameters<typeof startRun>[0];
+  if (typeof repoId === 'number') runOpts = { repoId };
+  else if (resumeOnly) runOpts = { resumeOnly: true };
+  else runOpts = { query };
+
+  const run = startRun(runOpts);
   return createStreamResponse(req, run);
 }
 

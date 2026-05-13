@@ -11,6 +11,7 @@ interface PipelineRun {
   child: ChildProcess;
   query: string;
   resumeOnly: boolean;
+  repoId: number | null;
   startedAt: string;
   runId: string;
   emitter: EventEmitter;
@@ -19,6 +20,7 @@ interface PipelineRun {
 export interface StartRunOptions {
   query?: string;
   resumeOnly?: boolean;
+  repoId?: number;
 }
 
 let currentRun: PipelineRun | null = null;
@@ -31,6 +33,7 @@ export function getStatus() {
     running: true,
     query: currentRun.query,
     resumeOnly: currentRun.resumeOnly,
+    repoId: currentRun.repoId,
     startedAt: currentRun.startedAt,
     runId: currentRun.runId,
   };
@@ -43,7 +46,9 @@ export function startRun(opts: StartRunOptions) {
 
   const scriptPath = path.join(process.cwd(), ...PIPELINE_ENTRYPOINT);
   const childArgs: string[] = [scriptPath];
-  if (opts.resumeOnly) {
+  if (typeof opts.repoId === 'number') {
+    childArgs.push(`--repo-id=${opts.repoId}`);
+  } else if (opts.resumeOnly) {
     childArgs.push('--resume');
   } else if (opts.query) {
     childArgs.push(opts.query);
@@ -57,8 +62,14 @@ export function startRun(opts: StartRunOptions) {
 
   const run: PipelineRun = {
     child,
-    query: opts.resumeOnly ? '(resume only)' : (opts.query ?? ''),
+    query:
+      typeof opts.repoId === 'number'
+        ? `(single repo #${opts.repoId})`
+        : opts.resumeOnly
+          ? '(resume only)'
+          : (opts.query ?? ''),
     resumeOnly: !!opts.resumeOnly,
+    repoId: typeof opts.repoId === 'number' ? opts.repoId : null,
     startedAt: new Date().toISOString(),
     runId: Math.random().toString(36).substring(7),
     emitter,

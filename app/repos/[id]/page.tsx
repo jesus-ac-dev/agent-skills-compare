@@ -112,6 +112,108 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     setUpdating(false)
   }
 
+  // Single-repo pipeline run: POSTs /api/pipeline with { repoId } and polls
+  // for completion. Re-fetches the repo + files when done so the UI reflects
+  // fresh analyses.
+  const [runState, setRunState] = useState<'idle' | 'starting' | 'running' | 'busy-other'>('idle')
+  const [runError, setRunError] = useState<string | null>(null)
+
+  async function refreshRepoData() {
+    const { data: repoData } = await supabase.from('repos').select('*').eq('id', id).single()
+    if (repoData) setRepo(repoData)
+    // re-trigger files fetch via the existing effect by toggling loading
+    // would be cleaner with a refetch function; keep simple — do it inline:
+    const pageSize = 1000
+    const accumulated: any[] = []
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from('files_sources')
+        .select(
+          `*, analysis(
+            *,
+            classes(name),
+            analysis_domains(domains(name)),
+            analysis_activities(activities(name)),
+            analysis_tags(tags(name))
+          )`
+        )
+        .eq('repo_id', id)
+        .range(from, from + pageSize - 1)
+      if (error || !data || data.length === 0) break
+      accumulated.push(...data)
+      if (data.length < pageSize) break
+    }
+    setFiles(accumulated)
+  }
+
+  async function handleRunThisRepo() {
+    setRunState('starting')
+    setRunError(null)
+    try {
+      const res = await fetch('/api/pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoId: Number(id) })
+      })
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({}))
+        setRunState('busy-other')
+        setRunError(
+          `Pipeline is already running another job (${data.query ?? '?'}). Wait or cancel it in /run.`
+        )
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `HTTP ${res.status}`)
+      }
+      setRunState('running')
+      // Drain the SSE stream just to keep the connection alive — we don't
+      // render logs here, we rely on the polling effect below to detect end.
+      const reader = res.body?.getReader()
+      if (reader) {
+        ;(async () => {
+          while (true) {
+            const { done } = await reader.read()
+            if (done) break
+          }
+        })()
+      }
+    } catch (err) {
+      setRunState('idle')
+      setRunError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // Poll /api/pipeline while a run is happening on THIS repo. When it ends,
+  // refresh the page data so the new analyses + status are visible.
+  useEffect(() => {
+    if (runState !== 'running') return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/pipeline')
+        const data = await res.json()
+        if (stopped) return
+        if (!data.running) {
+          setRunState('idle')
+          await refreshRepoData()
+        } else if (data.repoId !== Number(id)) {
+          setRunState('busy-other')
+          setRunError(`Pipeline switched to another job (${data.query ?? '?'}).`)
+        }
+      } catch {
+        // ignore one-off network errors
+      }
+    }
+    const handle = setInterval(tick, 3000)
+    return () => {
+      stopped = true
+      clearInterval(handle)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runState, id])
+
   if (loading) return <div>Loading...</div>
   if (!repo) return <div>Repo not found</div>
 
@@ -152,22 +254,33 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-1">
-          {repo.status === 'pending' || repo.status === 'processing' ? (
-            <>
-              <Link
-                href="/run"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-700 text-sm font-medium"
+          <div className="flex gap-2">
+            {repo.status !== 'pending' && repo.status !== 'processing' && (
+              <Button
+                onClick={handleReanalyze}
+                disabled={updating || runState === 'running' || runState === 'starting'}
+                variant="outline"
               >
-                ▶ Run pipeline
-              </Link>
-              <span className="text-xs text-muted-foreground">
-                Queued ({repo.status}) — start the pipeline to process it
-              </span>
-            </>
-          ) : (
-            <Button onClick={handleReanalyze} disabled={updating}>
-              {updating ? 'Queuing…' : 'Re-analyze Repo'}
+                {updating ? 'Queuing…' : 'Re-analyze'}
+              </Button>
+            )}
+            <Button
+              onClick={handleRunThisRepo}
+              disabled={runState === 'starting' || runState === 'running' || runState === 'busy-other'}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {runState === 'running'
+                ? '⏳ Running…'
+                : runState === 'starting'
+                  ? 'Starting…'
+                  : '▶ Run this repo'}
             </Button>
+          </div>
+          {runError && <span className="text-xs text-red-700 max-w-xs text-right">{runError}</span>}
+          {runState === 'idle' && (repo.status === 'pending' || repo.status === 'processing') && (
+            <span className="text-xs text-muted-foreground">
+              Queued ({repo.status}) — click Run to process it now
+            </span>
           )}
         </div>
       </div>

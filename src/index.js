@@ -317,17 +317,45 @@ async function hydrateRepoFromDb(dbRepo) {
 async function main() {
   const args = process.argv.slice(2)
   const resumeOnly = args.includes('--resume')
+  const repoIdArg = args.find((a) => a.startsWith('--repo-id='))
+  const onlyRepoId = repoIdArg ? Number(repoIdArg.slice('--repo-id='.length)) : null
   const positional = args.filter((a) => !a.startsWith('--'))
   const query = positional[0] || 'agent skills'
 
   const provider = await getActiveProvider()
-  logger.info(
-    resumeOnly
-      ? `Starting pipeline (resume-only mode; provider: ${provider.name})`
-      : `Starting pipeline (query: "${query}", provider: ${provider.name})`
-  )
+  if (onlyRepoId !== null && Number.isFinite(onlyRepoId)) {
+    logger.info(
+      `Starting pipeline (single-repo mode, id=${onlyRepoId}; provider: ${provider.name})`
+    )
+  } else {
+    logger.info(
+      resumeOnly
+        ? `Starting pipeline (resume-only mode; provider: ${provider.name})`
+        : `Starting pipeline (query: "${query}", provider: ${provider.name})`
+    )
+  }
 
   try {
+    // Single-repo mode: bypass seed/curated/resumable/search entirely and
+    // process just the one repo identified by id. Used by the "Run this
+    // repo" button on /repos/[id].
+    if (onlyRepoId !== null && Number.isFinite(onlyRepoId)) {
+      const { data: dbRepo, error: fetchErr } = await supabase
+        .from('repos')
+        .select('id, repo_url, name, status')
+        .eq('id', onlyRepoId)
+        .single()
+      if (fetchErr || !dbRepo) {
+        logger.error(`No repo found with id=${onlyRepoId}: ${fetchErr?.message ?? 'not found'}`)
+        process.exitCode = 1
+        return
+      }
+      const repo = await hydrateRepoFromDb(dbRepo)
+      await processRepo(repo)
+      logger.info('Single-repo run completed.')
+      return
+    }
+
     let curatedUrls = []
     if (!resumeOnly) {
       ;({ curatedUrls } = await seedCuratedRepos())

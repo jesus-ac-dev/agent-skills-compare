@@ -11,7 +11,7 @@ function normaliseGithubUrl(url) {
   if (!match) return null
   const owner = match[1].toLowerCase()
   const repo = match[2]
-  return `https://github.com/${owner}/${repo}`
+  return { repo_url: `https://github.com/${owner}/${repo}`, name: repo }
 }
 
 /**
@@ -27,7 +27,7 @@ export async function seedCuratedRepos() {
   } catch (err) {
     if (err.code === 'ENOENT') {
       logger.warn(`No curated-repos.json found at ${CONFIG_PATH.pathname}; skipping seed.`)
-      return { inserted: 0, skipped: 0, invalid: 0 }
+      return { inserted: 0, skipped: 0, invalid: 0, curatedUrls: [] }
     }
     throw err
   }
@@ -40,7 +40,7 @@ export async function seedCuratedRepos() {
   }
 
   if (!Array.isArray(entries) || entries.length === 0) {
-    return { inserted: 0, skipped: 0, invalid: 0 }
+    return { inserted: 0, skipped: 0, invalid: 0, curatedUrls: [] }
   }
 
   const seen = new Set()
@@ -59,13 +59,15 @@ export async function seedCuratedRepos() {
       invalid++
       continue
     }
-    if (seen.has(normalised)) continue
-    seen.add(normalised)
-    rows.push({ repo_url: normalised, status: 'pending' })
+    if (seen.has(normalised.repo_url)) continue
+    seen.add(normalised.repo_url)
+    rows.push({ repo_url: normalised.repo_url, name: normalised.name, status: 'pending' })
   }
 
+  const curatedUrls = rows.map((r) => r.repo_url)
+
   if (rows.length === 0) {
-    return { inserted: 0, skipped: 0, invalid }
+    return { inserted: 0, skipped: 0, invalid, curatedUrls: [] }
   }
 
   const { data, error } = await supabase
@@ -84,5 +86,5 @@ export async function seedCuratedRepos() {
     `Seeded ${inserted} new curated repos (${skipped} already in DB, ${invalid} invalid skipped).`
   )
 
-  return { inserted, skipped, invalid }
+  return { inserted, skipped, invalid, curatedUrls }
 }

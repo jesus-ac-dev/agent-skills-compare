@@ -33,7 +33,8 @@ async function recordFileError(repoId, message, filePath) {
 async function loadAnalyzedHashes(repoId) {
   const { data, error } = await supabase
     .from('files_sources')
-    .select(`
+    .select(
+      `
       url,
       hash,
       analysis (
@@ -47,7 +48,8 @@ async function loadAnalyzedHashes(repoId) {
         analysis_activities (activities (name)),
         analysis_tags (tags (name))
       )
-    `)
+    `
+    )
     .eq('repo_id', repoId)
 
   if (error) {
@@ -248,17 +250,11 @@ export async function processRepo(repo) {
       if (existingAnalysis) {
         logger.info(`Reusing existing analysis for duplicate file: ${filePath}`)
         await persistClassification(fileSource.id, existingAnalysis)
-        await supabase
-          .from('files_sources')
-          .update({ status: 'reused' })
-          .eq('id', fileSource.id)
+        await supabase.from('files_sources').update({ status: 'reused' }).eq('id', fileSource.id)
       } else {
         const classification = await classifyProject(content)
         await persistClassification(fileSource.id, classification)
-        await supabase
-          .from('files_sources')
-          .update({ status: 'completed' })
-          .eq('id', fileSource.id)
+        await supabase.from('files_sources').update({ status: 'completed' }).eq('id', fileSource.id)
 
         // Cache it for subsequent files in this repo run
         hashToAnalysis.set(hash, classification)
@@ -329,8 +325,29 @@ async function main() {
   )
 
   try {
+    let curatedUrls = []
     if (!resumeOnly) {
-      await seedCuratedRepos()
+      ;({ curatedUrls } = await seedCuratedRepos())
+    }
+
+    if (curatedUrls.length > 0) {
+      const { data: curatedRows } = await supabase
+        .from('repos')
+        .select('id, repo_url, name, status')
+        .in('repo_url', curatedUrls)
+        .in('status', ['pending', 'processing'])
+
+      if (curatedRows && curatedRows.length > 0) {
+        const orderMap = new Map(curatedUrls.map((u, i) => [u, i]))
+        const ordered = [...curatedRows].sort(
+          (a, b) => orderMap.get(a.repo_url) - orderMap.get(b.repo_url)
+        )
+        logger.info(`Processing ${ordered.length} curated repo(s) with priority.`)
+        for (const dbRepo of ordered) {
+          const repo = await hydrateRepoFromDb(dbRepo)
+          await processRepo(repo)
+        }
+      }
     }
 
     const resumable = await findResumableRepos()

@@ -101,14 +101,13 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     setUpdating(true)
     const { error } = await supabase
       .from('repos')
-      .update({ status: 'pending' })
+      .update({ status: 'pending', error_count: 0, last_error: null })
       .eq('id', id)
 
     if (error) {
       alert('Failed to update status: ' + error.message)
     } else {
-      setRepo({ ...repo, status: 'pending' })
-      alert('Repo status set to pending. The pipeline will pick it up on the next run.')
+      setRepo({ ...repo, status: 'pending', error_count: 0, last_error: null })
     }
     setUpdating(false)
   }
@@ -152,13 +151,25 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           </div>
         </div>
-        <Button
-          onClick={handleReanalyze}
-          disabled={updating || repo.status === 'pending'}
-          className="shrink-0"
-        >
-          {repo.status === 'pending' ? 'Pending...' : 'Re-analyze Repo'}
-        </Button>
+        <div className="shrink-0 flex flex-col items-end gap-1">
+          {repo.status === 'pending' || repo.status === 'processing' ? (
+            <>
+              <Link
+                href="/run"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-700 text-sm font-medium"
+              >
+                ▶ Run pipeline
+              </Link>
+              <span className="text-xs text-muted-foreground">
+                Queued ({repo.status}) — start the pipeline to process it
+              </span>
+            </>
+          ) : (
+            <Button onClick={handleReanalyze} disabled={updating}>
+              {updating ? 'Queuing…' : 'Re-analyze Repo'}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 text-xs">

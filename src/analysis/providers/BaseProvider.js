@@ -1,6 +1,18 @@
 // src/analysis/providers/BaseProvider.js
 
 /**
+ * Marker base class for "the provider is out of quota — stop and resume later".
+ * Concrete providers throw subclasses of this (e.g. GroqDailyQuotaError,
+ * ClaudeCliQuotaError) so the pipeline can react uniformly via instanceof.
+ */
+export class QuotaError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'QuotaError'
+  }
+}
+
+/**
  * Abstract interface every LLM provider implements.
  * Concrete subclasses live in this folder and own everything they need
  * (invocation, parsing, retries, provider-specific errors).

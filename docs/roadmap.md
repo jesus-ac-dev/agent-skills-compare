@@ -1,91 +1,90 @@
 # Roadmap
 
-Estado depois do redesign de schema/taxonomia v3 e fixes subsequentes.
+Estado depois das sessões intensivas de 2026-05-12 e 2026-05-13. Snapshot mais detalhado em [docs/status-2026-05-13.md](status-2026-05-13.md).
 
 ## ✅ Já feito
 
+**Schema + pipeline (taxonomia v3 e fixes):**
+
 - **Taxonomia multi-eixo** (commits `130b626..306941d`): `repos.status`, classes/domains/activities/tags + M2M, structured output do classifier.
-- **Fix M2M + Groq como provedor** (`3ba57c3`, `33a5e33`): tabelas `tags`/`activities` populadas como deve ser; free tier do Groq (~14k req/dia) substitui o limite de 20/dia do Gemini.
-- **Resume + hash skip + saída limpa em daily quota** (`aa1f7bf`): re-runs do mesmo corpus = 0 chamadas LLM em ficheiros inalterados; repos `processing` retomados ao arranque; daily quota propaga-se sem stack trace.
-- **Domain semi-open + auto-wait em daily quota**: domains desconhecidos (ex.: `marketing`) são auto-inseridos em vez de descartados; quando o erro de TPD/RPD vem com delay parseável e o delay é ≤ `GROQ_MAX_DAILY_WAIT_MS` (default 1h), o pipeline dorme + 10s e retoma sozinho.
-- **Snapshot da BD** em [docs/database/](database/) — schema + sample data + queries-tipo para a UI.
+- **Fix M2M + Groq como provedor inicial** (`3ba57c3`, `33a5e33`): tabelas `tags`/`activities` populadas; free tier do Groq (~14k req/dia).
+- **Resume + hash skip + saída limpa em daily quota** (`aa1f7bf`): re-runs do mesmo corpus = 0 chamadas LLM em ficheiros inalterados.
+- **Domain semi-open + auto-wait em daily quota**: domains desconhecidos auto-inseridos; pipeline dorme até reset se o delay for ≤ `GROQ_MAX_DAILY_WAIT_MS`.
+- **Pipeline halt on quota + dedup por hash + broaden file discovery** (`02868d1`): `QuotaError` partilhado em `BaseProvider`, all-files (não só `.md`), dedup intra-repo por hash.
+- **Re-add `files_sources.status`** (`45d180e`): per-file granularidade (`pending/processing/completed/reused/skipped/error`) que o refactor `02868d1` assumia mas tinha sido dropped numa migration anterior.
 
-Isto resolve a **Etapa 1** original (incremental vs refresh) na prática:
+**LLM provider selector (Etapa nova):**
 
-- Incremental: já é o default. `done` salta, `processing`+`pending` resumem, hash igual salta.
-- Refresh per-repo: `UPDATE repos SET status='pending' WHERE id=?` (a UI pode disparar isto com um botão).
-- Refresh global: `UPDATE repos SET status='pending'` — re-roda tudo, hash skip mantém custo baixo.
+- **Settings table + factory + 3 providers** (`fa1784d..16a73f0`): `groqProvider`, `geminiProvider`, `claudeCliProvider` extendem `BaseProvider`; `factory.js` lê `settings.llm_provider` e cacheia.
+- **API + UI selector** (`cc2b792..bd7e9ed`): `GET/PUT /api/settings/llm-provider`, `GET /api/settings/llm-provider/health`, dropdown no header com chips de health.
+- **`QuotaError` partilhado** (`be59b0f`): qualquer provider que estoure quota propaga via `instanceof QuotaError`; pipeline sai limpo, repo fica `processing`.
+
+**Curated seed list (Etapa B):**
+
+- **Loader + 15 entries** (`f6ca0c6` + fixes `1786a64`): `config/curated-repos.json`, `src/seed/curatedRepos.js`, INSERT IGNORE em `repos` com `status='pending'`. Idempotente.
+- **Prioridade explícita** (`1786a64`): curated processadas em ordem do JSON, **antes** de qualquer outro pending — o `findResumableRepos` corre depois.
+- **Manual repo add via UI** (`7775744`): `POST /api/repos` + `<RepoAdd />` no header. Reusa `normaliseGithubUrl` partilhado com o seed.
+
+**Classifier code-aware (Etapa nova):**
+
+- **Per-extension file_types + kind branching** (`1e6ce2c`): `src/utils/fileKind.js`, `file_types` extendido para `javascript/typescript/python/shell/json/yaml/html`, prompt do classifier ramifica por `kind ∈ {markdown, code, config, text}`.
+
+**Operações de qualidade (Etapa D):**
+
+- **`npm run db:health`** (`45d180e`): contagens por status, top recent errors, fragmentação por root word.
+- **`npm run db:canonicalize`** (`2d75adb`): dry-run por defeito, `--apply` para commit. Mapa em `config/canonical-aliases.json` editado pelo user.
+
+**UI (Etapa C — completa):**
+
+- **`/` (Analyses)** — tabela de `analysis_with_axes`, search livre, filtros via URL (`?class=`, `?domain=`, `?activity=`, `?tag=`) com chip activo.
+- **`/repos`** — fleet view com todos os repos, status pills, contagem de ficheiros, error count, last analyzed, botão Reanalyze. Filtros por status + "only with errors".
+- **`/repos/[id]`** — chips de file-status no topo, relative time, chips clicáveis por análise (class/domain/activity/tag → drill-down para `/`).
+- **`/stats`** — top entries por axis, cada item é link para `/?<axis>=<value>`, "Show all" expande além do top 10.
+- **`/run`** — disparar pipeline com streaming de logs (`/api/pipeline`), badge de resumables.
+
+---
 
 ## Próximas etapas
 
-### A. Canonicalização do vocabulário aberto
+### A1. Fix do prompt para prevenir fragmentação
 
-**Problema:** dados reais já mostram fragmentação previsível em `activities` e `tags`:
+Ainda não feito. O `db:canonicalize` cura retroactivamente, mas a fragmentação volta a aparecer em cada run novo. **~10 linhas** em `classifyProject.js`:
 
-| Cluster       | Variantes observadas                                                                                 | Canónica sugerida                      |
-| ------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Análise       | `analyzing`, `analysis`, `data-analysis`, `failure-analysis`, `writing-style-analysis`               | `data-analysis` (seed)                 |
-| Optimização   | `optimizing`, `optimization`, `content-optimization`, `outreach-optimization`                        | `performance-tuning` ou `optimization` |
-| Pesquisa      | `researching`, `research`                                                                            | `research` (seed)                      |
-| Implementação | `implementing`, `implementation`                                                                     | `implementation`                       |
-| Segurança     | `security-audit`, `security-auditing`, `auditing`, `vulnerability-assessment`, `penetration-testing` | `security-audit` (seed)                |
-| Design        | `designing`, `api-design`, `architecture-planning`, `workflow-design`                                | `planning` ou novo `design`            |
+- Carregar lista actual de `activities` da BD (já temos `loadClosedVocabulary()` para closed lists — estender para semi-open).
+- Acrescentar ao system prompt: _"PREFER these existing values when they fit; only invent new ones for truly novel concepts. Use noun form (e.g. 'analysis', not 'analyzing'). Singular over plural."_
 
-**Proposta — duas vertentes:**
+**Critério:** depois do fix, um run num repo grande não produz `analyzing` se `analysis` já existir.
 
-1. **Prevenir** (fix no prompt, ~10 linhas): carregar a lista actual de `activities` (e `domains`) da BD e injectá-la no system prompt como _"PREFER these existing values when they fit; only invent new ones for truly novel concepts. Use noun form, not gerund (e.g. 'analysis', not 'analyzing')."_ Reduz fragmentação em re-runs futuros sem mexer em dados antigos.
+### D2. Truncate / sumarizar summaries muito longos
 
-2. **Corrigir** (canonicalizar o que já existe): comando standalone `npm run db:canonicalize` que aplica um mapa `{ analyzing → analysis, researching → research, ... }` actualizando `analysis_activities`/`analysis_tags` para apontar para a entrada canónica e apagando duplicados. Mapa fica em `config/canonical-aliases.json` para o utilizador editar.
+Alguns ficheiros produzem summaries de 3-4 frases que partem layouts da UI. Opções:
 
-**Critérios de aceitação:**
+- Acrescentar `summary_short TEXT` derivado (primeiros 200 chars + …).
+- Forçar no prompt: "summary: ONE sentence, ≤ 200 chars" (já tem `minLength: 80`).
 
-- Depois de aplicar o fix do prompt, um run novo num repo grande não produz duplicados óbvios (gerund/noun, plural/singular).
-- Depois de correr `db:canonicalize` com um mapa razoável, a contagem em `activities` cai ≥ 20% sem perder informação (cada eliminado tem um destino canónico, todas as M2M são preservadas).
+### 2. Filtro "only with errors" na `/`
 
-### ✅ B. Lista curada de repos seed (feito 2026-05-13)
+A view `analysis_with_axes` não tem `files_sources.status`. Para filtrar por erro na lista, ou:
 
-Implementado em `src/seed/curatedRepos.js` + `config/curated-repos.json` (15 entries iniciais). O loader corre no arranque de `main()` antes do `findResumableRepos`, inserindo URLs novas com `status='pending'`. Idempotente via `ON CONFLICT DO NOTHING` (`ignoreDuplicates: true`) — re-runs não tocam em repos já processados. Skipped em modo `--resume`.
+- Estender a view com `files_sources.status` (precisa de re-create view, simples).
+- Ou query separada para `files_sources.status='error'` e mostrar numa secção dedicada.
 
-Adicionar novos repos canónicos: editar `config/curated-repos.json` e correr `npm start` (com ou sem query). Reanalisar repos existentes continua a ser via `UPDATE repos SET status='pending' WHERE id=?` — a lista curada nunca sobrepõe estado existente.
+### 3. Pagination na `/`
 
-Spec: [docs/superpowers/specs/2026-05-12-curated-seed-repos-design.md](superpowers/specs/2026-05-12-curated-seed-repos-design.md).
+Hoje `/` faz `select('*')` sem limit. Com 4k+ análises na BD, vai começar a doer no carregamento. Adicionar `range(from, from + 50)` + paginação básica (next/prev).
 
-### C. UI simples para ler os dados (sub-projecto)
+### 4. (Adiada — só se sentires falta) Search semântica
 
-**Handoff para Jules AI:** [docs/database/README.md](database/README.md) tem schema, sample data, modelo conceptual, queries-tipo. A `analysis_with_axes` view é a primeira coisa a materializar; o resto é UI por cima dela.
+Embeddings via `pgvector` + um job `npm run embed:backfill` para gerar embeddings dos summaries. Não vale a pena enquanto filtros + drill-down chegarem.
 
-**Stack sugerida:**
+---
 
-- Next.js 15 App Router + `@supabase/supabase-js` (anon key, read-only).
-- `shadcn/ui` para componentes; tabela com `@tanstack/react-table`.
-- Filtros em URL via `useSearchParams` (URL = estado).
+## Quirks descobertos durante as sessões (vale a pena lembrar)
 
-**Vistas mínimas:**
-
-1. **Lista** — filtros lado-a-lado por `class`, `domains` (multi-select OR), `activities` (multi-select OR), `tags`, score mínimo, maturity. Cards com avatar/nome/summary/chips dos eixos.
-2. **Detalhe de repo** — lista de ficheiros analisados + classificação por ficheiro + `use_cases`.
-3. **Stats** — top tags/activities/domains, distribuição por class, contagem por status.
-
-**Operações de pipeline disparadas da UI:**
-
-- "Reanalisar repo" → `UPDATE repos SET status='pending' WHERE id=?`. O pipeline (quando correr) apanha-o em `findResumableRepos`.
-- "Marcar como ignorado" → idealmente novo estado `archived` ou flag separada; fora de scope mínimo.
-
-**Onde fica:** sub-pasta `web/` na raiz (monorepo simples) ou repo separado se a UI crescer.
-
-### D. Operações de qualidade contínua
-
-Pequenas mas úteis quando a BD começar a crescer:
-
-- **`npm run db:health`** — relatório SQL rápido: repos por estado, ficheiros sem análise, análises órfãs, top erros recentes. Útil para detectar drift antes de virar problema.
-- **Truncar `summary` muito longos** ou ter um campo `summary_short` derivado — alguns ficheiros gigantes produzem summaries de várias frases que partem layouts da UI.
-- **Re-classify** com modelo melhor (ex.: trocar `llama-3.3-70b-versatile` por algo do Tier 1 pago): combinado com `db:canonicalize` e com hash skip, fica relativamente barato testar diferentes modelos em batch.
-
-## Ordem sugerida
-
-1. (A1) Fix do prompt para canonicalização — 10 linhas, payoff imediato.
-2. (C) UI via Jules AI — desbloqueia produto real.
-3. (A2) Canonicalização retroactiva — quando houver dados suficientes para justificar.
-4. (D) Operações de qualidade — só quando a dor aparecer.
-
-Cada uma destas etapas merece o seu próprio brainstorming + spec + plano antes de implementar — o ciclo `superpowers:brainstorming → writing-plans → subagent-driven-development` deu bons frutos no v3.
+- **`repos.name` é NOT NULL** — qualquer insert via curated/manual precisa de passar o nome (extraído da URL).
+- **GitHub URLs com case-mixed owner** (`Kilo-Org`) precisam de ser lowercased para o UNIQUE de `repo_url` funcionar — feito em `normaliseGithubUrl`.
+- **Postgres BIGINT IDENTITY queima IDs em rollback** — gaps nos IDs (ex: passar de 5 para 12) acontecem por inserts falhados anteriormente. Cosmético, não bug.
+- **shadcn `DropdownMenuLabel` requer `<DropdownMenuGroup>` parent** — caso contrário falha com `MenuGroupRootContext is missing`.
+- **PostgREST `select` cap de 1000 rows** — para contagens grandes, usar `count: 'exact', head: true` por valor distinto (padrão em `scripts/db-health.mjs`).
+- **`supabase` CLI nunca sem `--local`** — o repo nunca esteve linked a cloud. Preferir `npm run db:*`.
+- **Nunca `npm run build` enquanto `npm run dev` corre** — partilham `.next/`, parte tudo.

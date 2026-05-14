@@ -1,5 +1,29 @@
 [
   {
+    "url": "https://github.com/cline/cline",
+    "reason": "Autonomous coding agent inside the IDE — heavy .ts/.js (heavyweight)"
+  },
+  {
+    "url": "https://github.com/Kilo-Org/kilocode",
+    "reason": "All-in-one agentic engineering platform — heavy .ts/.js (heavyweight)"
+  },
+  {
+    "url": "https://github.com/langchain-ai/open-swe",
+    "reason": "Open-source async coding agent"
+  },
+  {
+    "url": "https://github.com/paperclipai/paperclip",
+    "reason": "Open-source orchestration for zero-human companies"
+  },
+  {
+    "url": "https://github.com/openclaw/openclaw",
+    "reason": "Personal AI assistant — agent loop in code"
+  },
+  {
+    "url": "https://github.com/nousresearch/hermes-agent",
+    "reason": "NousResearch's agent platform"
+  },
+  {
     "url": "https://github.com/anthropics/skills",
     "reason": "Official — source of truth for Agent Skills"
   },
@@ -20,30 +44,6 @@
     "reason": "Knowledge-graph skill — turn any folder into a queryable graph"
   },
   {
-    "url": "https://github.com/cline/cline",
-    "reason": "Autonomous coding agent inside the IDE — system prompts and tool definitions live in code"
-  },
-  {
-    "url": "https://github.com/Kilo-Org/kilocode",
-    "reason": "All-in-one agentic engineering platform — heavy .ts/.js"
-  },
-  {
-    "url": "https://github.com/langchain-ai/open-swe",
-    "reason": "Open-source async coding agent"
-  },
-  {
-    "url": "https://github.com/paperclipai/paperclip",
-    "reason": "Open-source orchestration for zero-human companies"
-  },
-  {
-    "url": "https://github.com/openclaw/openclaw",
-    "reason": "Personal AI assistant — agent loop in code"
-  },
-  {
-    "url": "https://github.com/nousresearch/hermes-agent",
-    "reason": "NousResearch's agent platform"
-  },
-  {
     "url": "https://github.com/davila7/claude-code-templates",
     "reason": "CLI tool for configuring and monitoring Claude Code"
   },
@@ -58,5 +58,9 @@
   {
     "url": "https://github.com/microsoft/vscode-chat-customizations-evaluation",
     "reason": "Microsoft's eval rig for chat customizations"
+  },
+  {
+    "url": "https://github.com/brobertsaz/claude-os",
+    "reason": "Every conversation makes Claude smarter. Every insight builds your shared knowledge"
   }
 ]

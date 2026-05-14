@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import { ResumableBadge } from "@/components/resumable-badge";
+import { ProviderSelect } from "@/components/provider-select";
+import { RepoAdd } from "@/components/repo-add";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,9 +36,14 @@ export default function RootLayout({
             <Link href="/" className="font-bold text-xl">
               Agentic Explorer
             </Link>
-            <nav className="flex gap-6">
+            <nav className="flex items-center gap-6">
+              <RepoAdd />
+              <ProviderSelect />
               <Link href="/" className="text-sm font-medium hover:underline">
                 Analyses
+              </Link>
+              <Link href="/repos" className="text-sm font-medium hover:underline">
+                Repos
               </Link>
               <Link href="/stats" className="text-sm font-medium hover:underline">
                 Stats

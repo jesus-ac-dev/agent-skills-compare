@@ -1,46 +1,89 @@
 import { searchRepos, fetchRepoDetails, parseRepoUrl } from './github/searchRepos.js'
 import { listFilesRecursive, filterRelevantFiles, fetchFile } from './github/fetchFiles.js'
 import { classifyProject } from './analysis/classifyProject.js'
-import { GroqDailyQuotaError } from './analysis/providers/groqProvider.js'
+import { QuotaError } from './analysis/providers/BaseProvider.js'
 import { getActiveProvider } from './analysis/providers/factory.js'
 import { generateHash } from './utils/hash.js'
 import logger from './utils/logger.js'
 import { supabase } from './db/supabaseClient.js'
 import { resolveClosedId, upsertOpenId } from './db/lookups.js'
 import { seedCuratedRepos } from './seed/curatedRepos.js'
+import { detectFileKind, detectFileTypeName } from './utils/fileKind.js'
 
 async function setRepoStatus(repoId, patch) {
   const { error } = await supabase.from('repos').update(patch).eq('id', repoId)
   if (error) logger.error(`Failed to update repo ${repoId} status:`, error.message)
 }
 
-async function recordFileError(repoId, message) {
+async function recordFileError(repoId, message, filePath) {
   const { data } = await supabase.from('repos').select('error_count').eq('id', repoId).single()
   const next = (data?.error_count ?? 0) + 1
   await supabase.from('repos').update({ error_count: next, last_error: message }).eq('id', repoId)
+
+  if (filePath) {
+    await supabase
+      .from('files_sources')
+      .update({ status: 'error' })
+      .match({ repo_id: repoId, path: filePath })
+  }
 }
 
 /**
- * Returns a Set of file URLs that already have a current analysis row for this repo.
- * "Current" = files_sources.hash matches what's in DB (no need to re-check, since we
- * compare against the freshly-computed hash before each Groq call).
+ * Returns maps of URL to hash and Hash to existing analysis for a repo.
  */
 async function loadAnalyzedHashes(repoId) {
   const { data, error } = await supabase
     .from('files_sources')
-    .select('url, hash, analysis(id)')
+    .select(
+      `
+      url,
+      hash,
+      analysis (
+        id,
+        summary,
+        maturity,
+        score,
+        use_cases,
+        classes (name),
+        analysis_domains (domains (name)),
+        analysis_activities (activities (name)),
+        analysis_tags (tags (name))
+      )
+    `
+    )
     .eq('repo_id', repoId)
+
   if (error) {
     logger.warn(`loadAnalyzedHashes(${repoId}) error: ${error.message}`)
-    return new Map()
+    return { urlToHash: new Map(), hashToAnalysis: new Map() }
   }
-  const map = new Map()
+
+  const urlToHash = new Map()
+  const hashToAnalysis = new Map()
+
   for (const row of data ?? []) {
-    if (row.analysis && row.analysis.id != null) {
-      map.set(row.url, row.hash)
+    // analysis comes as an array or object depending on PostgREST
+    const analysis = Array.isArray(row.analysis) ? row.analysis[0] : row.analysis
+    if (analysis && analysis.id != null) {
+      urlToHash.set(row.url, row.hash)
+
+      if (!hashToAnalysis.has(row.hash)) {
+        hashToAnalysis.set(row.hash, {
+          summary: analysis.summary,
+          maturity: analysis.maturity,
+          score: analysis.score,
+          use_cases: analysis.use_cases,
+          class: analysis.classes?.name,
+          domains: (analysis.analysis_domains ?? []).map((d) => d.domains?.name).filter(Boolean),
+          activities: (analysis.analysis_activities ?? [])
+            .map((a) => a.activities?.name)
+            .filter(Boolean),
+          tags: (analysis.analysis_tags ?? []).map((t) => t.tags?.name).filter(Boolean)
+        })
+      }
     }
   }
-  return map
+  return { urlToHash, hashToAnalysis }
 }
 
 async function persistClassification(fileSourceId, payload) {
@@ -84,8 +127,6 @@ async function persistClassification(fileSourceId, payload) {
     supabase.from('analysis_tags').delete().eq('analysis_id', analysisId)
   ])
 
-  // Domains: prompt steers the classifier to the existing list, but if a new
-  // legitimate value comes back (e.g. "marketing"), upsert it instead of dropping.
   for (const domain of domains) {
     const id = await upsertOpenId('domains', domain)
     if (id) {
@@ -111,33 +152,123 @@ async function persistClassification(fileSourceId, payload) {
 }
 
 /**
- * Processes one repo. Throws GroqDailyQuotaError if the LLM daily quota
- * is exhausted mid-loop — the repo is left as 'processing' so the next run
- * resumes it.
+ * Processes one repo.
+ *
+ * @param {object} repo - GitHub repo object (from fetchRepoDetails / searchRepos).
+ * @param {object} [options]
+ * @param {number} [options.existingRepoId] - DB id of a row that already
+ *   represents this repo. When provided, the function UPDATEs that row by id
+ *   instead of upserting by repo_url — important when GitHub has renamed the
+ *   owner, otherwise we'd create a duplicate row under the new URL while the
+ *   old one (with all its existing files_sources/analysis) becomes an orphan.
  */
-async function processRepo(repo) {
-  logger.info(`Processing repository: ${repo.full_name}`)
+export async function processRepo(repo, options = {}) {
+  const { existingRepoId, force = false } = options
+  logger.info(`Processing repository: ${repo.full_name}${force ? ' (force re-analyze)' : ''}`)
 
-  const { data: dbRepo, error: repoError } = await supabase
-    .from('repos')
-    .upsert(
-      {
+  let repoId
+  // Base URL used to construct fileUrl for each file. We keep using the OLD
+  // (DB) URL when an existingRepoId is supplied so that urlToHash lookups
+  // continue to match previously-stored rows even if GitHub has renamed the
+  // canonical owner.
+  let baseRepoUrl
+
+  if (existingRepoId !== undefined) {
+    const { data: existing, error: existingErr } = await supabase
+      .from('repos')
+      .select('id, repo_url')
+      .eq('id', existingRepoId)
+      .single()
+    if (existingErr || !existing) {
+      logger.error(
+        `processRepo: no repo row with id=${existingRepoId} (${existingErr?.message ?? 'not found'})`
+      )
+      return
+    }
+    repoId = existing.id
+    baseRepoUrl = existing.repo_url
+
+    const { error: updateErr } = await supabase
+      .from('repos')
+      .update({
         name: repo.name,
-        repo_url: repo.html_url,
+        github_repo_id: repo.id ?? null,
+        // repo_url intentionally NOT updated — see the function docs.
         avatar_url: repo.owner.avatar_url,
         stars: repo.stargazers_count,
         last_commit: repo.pushed_at
-      },
-      { onConflict: 'repo_url' }
-    )
-    .select('id')
-    .single()
+      })
+      .eq('id', repoId)
+    if (updateErr) {
+      logger.error(`Error updating repo ${repo.full_name}: ${updateErr.message}`)
+      return
+    }
+  } else {
+    // No DB id provided — search-discovered or curated. Match against
+    // existing rows by the stable github_repo_id first (survives renames),
+    // fall back to repo_url for legacy rows, INSERT only if neither match.
+    let matchedId = null
 
-  if (repoError) {
-    logger.error(`Error saving repo ${repo.full_name}:`, repoError.message)
-    return
+    if (typeof repo.id === 'number') {
+      const { data: byGhId } = await supabase
+        .from('repos')
+        .select('id, repo_url')
+        .eq('github_repo_id', repo.id)
+        .maybeSingle()
+      if (byGhId) {
+        matchedId = byGhId.id
+        baseRepoUrl = byGhId.repo_url
+      }
+    }
+    if (matchedId === null) {
+      const { data: byUrl } = await supabase
+        .from('repos')
+        .select('id, repo_url')
+        .eq('repo_url', repo.html_url)
+        .maybeSingle()
+      if (byUrl) {
+        matchedId = byUrl.id
+        baseRepoUrl = byUrl.repo_url
+      }
+    }
+
+    if (matchedId !== null) {
+      const { error: updateErr } = await supabase
+        .from('repos')
+        .update({
+          name: repo.name,
+          github_repo_id: repo.id ?? null,
+          avatar_url: repo.owner.avatar_url,
+          stars: repo.stargazers_count,
+          last_commit: repo.pushed_at
+        })
+        .eq('id', matchedId)
+      if (updateErr) {
+        logger.error(`Error updating repo ${repo.full_name}: ${updateErr.message}`)
+        return
+      }
+      repoId = matchedId
+    } else {
+      const { data: inserted, error: insertErr } = await supabase
+        .from('repos')
+        .insert({
+          name: repo.name,
+          repo_url: repo.html_url,
+          github_repo_id: repo.id ?? null,
+          avatar_url: repo.owner.avatar_url,
+          stars: repo.stargazers_count,
+          last_commit: repo.pushed_at
+        })
+        .select('id')
+        .single()
+      if (insertErr) {
+        logger.error(`Error saving repo ${repo.full_name}:`, insertErr.message)
+        return
+      }
+      repoId = inserted.id
+      baseRepoUrl = repo.html_url
+    }
   }
-  const repoId = dbRepo.id
 
   await setRepoStatus(repoId, {
     status: 'processing',
@@ -161,29 +292,36 @@ async function processRepo(repo) {
   const relevantFiles = filterRelevantFiles(allFiles)
   logger.info(`Found ${relevantFiles.length} relevant files in ${repo.full_name}.`)
 
-  const analyzedHashes = await loadAnalyzedHashes(repoId)
+  // When force=true, skip the hash-cache load entirely so every file is
+  // re-classified by the active LLM (the user explicitly asked to ignore
+  // existing analyses).
+  const { urlToHash, hashToAnalysis } = force
+    ? { urlToHash: new Map(), hashToAnalysis: new Map() }
+    : await loadAnalyzedHashes(repoId)
   const sourceTypeId = await resolveClosedId('source_types', 'github_file')
   const branch = repo.default_branch || 'main'
 
-  let skipped = 0
+  let skippedCount = 0
+  const skippedUrls = []
+
   for (const filePath of relevantFiles) {
-    const fileUrl = `${repo.html_url}/blob/${branch}/${filePath}`
+    const fileUrl = `${baseRepoUrl}/blob/${branch}/${filePath}`
     try {
       const content = await fetchFile(repo.owner.login, repo.name, filePath)
       if (!content) continue
       const hash = generateHash(content)
 
-      // Skip when an analysis already exists for the same content.
-      if (analyzedHashes.get(fileUrl) === hash) {
-        skipped++
+      // Skip when an analysis already exists for the same content at this URL.
+      if (urlToHash.get(fileUrl) === hash) {
+        skippedCount++
+        skippedUrls.push(fileUrl)
         continue
       }
 
       logger.info(`Processing file: ${filePath}`)
-      const fileTypeId = await resolveClosedId(
-        'file_types',
-        filePath.endsWith('.md') ? 'markdown' : 'text'
-      )
+      const fileTypeName = detectFileTypeName(filePath)
+      const fileKind = detectFileKind(filePath)
+      const fileTypeId = await resolveClosedId('file_types', fileTypeName)
 
       const { data: fileSource, error: fsError } = await supabase
         .from('files_sources')
@@ -195,6 +333,7 @@ async function processRepo(repo) {
             hash,
             source_type_id: sourceTypeId,
             file_type_id: fileTypeId,
+            status: 'pending',
             last_checked: new Date().toISOString()
           },
           { onConflict: 'url' }
@@ -204,20 +343,48 @@ async function processRepo(repo) {
 
       if (fsError) throw new Error(`files_sources upsert: ${fsError.message}`)
 
-      const classification = await classifyProject(content)
-      await persistClassification(fileSource.id, classification)
+      const existingAnalysis = hashToAnalysis.get(hash)
+      if (existingAnalysis) {
+        logger.info(`Reusing existing analysis for duplicate file: ${filePath}`)
+        await persistClassification(fileSource.id, existingAnalysis)
+        await supabase.from('files_sources').update({ status: 'reused' }).eq('id', fileSource.id)
+      } else {
+        const classification = await classifyProject(content, {
+          kind: fileKind,
+          path: filePath
+        })
+        await persistClassification(fileSource.id, classification)
+        await supabase.from('files_sources').update({ status: 'completed' }).eq('id', fileSource.id)
+
+        // Cache it for subsequent files in this repo run
+        hashToAnalysis.set(hash, classification)
+      }
     } catch (err) {
-      if (err instanceof GroqDailyQuotaError) {
-        // Bubble up — repo stays 'processing' for resume on next run.
+      if (err instanceof QuotaError) {
         await setRepoStatus(repoId, { last_error: err.message })
         throw err
       }
       logger.error(`File failed (${filePath}): ${err.message}`)
-      await recordFileError(repoId, `${filePath}: ${err.message}`)
+      await recordFileError(repoId, `${filePath}: ${err.message}`, filePath)
     }
   }
 
-  if (skipped > 0) logger.info(`Skipped ${skipped} unchanged files in ${repo.full_name}.`)
+  // Bulk update files whose hash matched an existing analysis. These are
+  // "reused" (we kept the existing analysis instead of re-running the LLM) —
+  // semantically the same as the intra-run hashToAnalysis dedup path above.
+  if (skippedUrls.length > 0) {
+    logger.info(
+      `Reused existing analyses for ${skippedCount} unchanged files in ${repo.full_name}.`
+    )
+    const batchSize = 100
+    for (let i = 0; i < skippedUrls.length; i += batchSize) {
+      const batch = skippedUrls.slice(i, i + batchSize)
+      await supabase
+        .from('files_sources')
+        .update({ status: 'reused', last_checked: new Date().toISOString() })
+        .in('url', batch)
+    }
+  }
 
   await setRepoStatus(repoId, {
     status: 'done',
@@ -226,9 +393,7 @@ async function processRepo(repo) {
 }
 
 /**
- * Returns repos that need work: status='processing' (interrupted runs) first,
- * then status='pending' (newly upserted, not yet started). 'done' and 'failed'
- * are skipped — failures stay sticky until something marks them pending again.
+ * Returns repos that need work.
  */
 async function findResumableRepos() {
   const { data, error } = await supabase
@@ -239,12 +404,11 @@ async function findResumableRepos() {
     logger.error(`findResumableRepos error: ${error.message}`)
     return []
   }
-  // 'processing' first (interrupted runs take priority), then 'pending'.
   return (data ?? []).sort((a, b) => (a.status === 'processing' ? -1 : 1))
 }
 
 /**
- * Hydrates a DB repo row into the GitHub-shaped object processRepo expects.
+ * Hydrates a DB repo row into the GitHub-shaped object.
  */
 async function hydrateRepoFromDb(dbRepo) {
   const { owner, name } = parseRepoUrl(dbRepo.repo_url)
@@ -254,40 +418,84 @@ async function hydrateRepoFromDb(dbRepo) {
 async function main() {
   const args = process.argv.slice(2)
   const resumeOnly = args.includes('--resume')
+  const force = args.includes('--force')
+  const repoIdArg = args.find((a) => a.startsWith('--repo-id='))
+  const onlyRepoId = repoIdArg ? Number(repoIdArg.slice('--repo-id='.length)) : null
   const positional = args.filter((a) => !a.startsWith('--'))
   const query = positional[0] || 'agent skills'
 
   const provider = await getActiveProvider()
-  logger.info(
-    resumeOnly
-      ? `Starting pipeline (resume-only mode — no new GitHub search; provider: ${provider.name})`
-      : `Starting pipeline (query: "${query}", provider: ${provider.name})`
-  )
+  if (onlyRepoId !== null && Number.isFinite(onlyRepoId)) {
+    logger.info(
+      `Starting pipeline (single-repo mode, id=${onlyRepoId}; provider: ${provider.name})`
+    )
+  } else {
+    logger.info(
+      resumeOnly
+        ? `Starting pipeline (resume-only mode; provider: ${provider.name})`
+        : `Starting pipeline (query: "${query}", provider: ${provider.name})`
+    )
+  }
 
   try {
-    // 1. Seed the curated list (skipped in --resume mode per spec).
-    if (!resumeOnly) {
-      await seedCuratedRepos()
+    // Single-repo mode: bypass seed/curated/resumable/search entirely and
+    // process just the one repo identified by id. Used by the "Run this
+    // repo" button on /repos/[id].
+    if (onlyRepoId !== null && Number.isFinite(onlyRepoId)) {
+      const { data: dbRepo, error: fetchErr } = await supabase
+        .from('repos')
+        .select('id, repo_url, name, status')
+        .eq('id', onlyRepoId)
+        .single()
+      if (fetchErr || !dbRepo) {
+        logger.error(`No repo found with id=${onlyRepoId}: ${fetchErr?.message ?? 'not found'}`)
+        process.exitCode = 1
+        return
+      }
+      const repo = await hydrateRepoFromDb(dbRepo)
+      await processRepo(repo, { existingRepoId: dbRepo.id, force })
+      logger.info(`Single-repo run completed${force ? ' (force re-analyze)' : ''}.`)
+      return
     }
 
-    // 2. Resume any repos that were left mid-flight (includes freshly seeded pending rows).
+    let curatedUrls = []
+    if (!resumeOnly) {
+      ;({ curatedUrls } = await seedCuratedRepos())
+    }
+
+    if (curatedUrls.length > 0) {
+      const { data: curatedRows } = await supabase
+        .from('repos')
+        .select('id, repo_url, name, status')
+        .in('repo_url', curatedUrls)
+        .in('status', ['pending', 'processing'])
+
+      if (curatedRows && curatedRows.length > 0) {
+        const orderMap = new Map(curatedUrls.map((u, i) => [u, i]))
+        const ordered = [...curatedRows].sort(
+          (a, b) => orderMap.get(a.repo_url) - orderMap.get(b.repo_url)
+        )
+        logger.info(`Processing ${ordered.length} curated repo(s) with priority.`)
+        for (const dbRepo of ordered) {
+          const repo = await hydrateRepoFromDb(dbRepo)
+          await processRepo(repo, { existingRepoId: dbRepo.id })
+        }
+      }
+    }
+
     const resumable = await findResumableRepos()
     if (resumable.length > 0) {
       logger.info(`Resuming ${resumable.length} repo(s) from previous runs.`)
       for (const dbRepo of resumable) {
         const repo = await hydrateRepoFromDb(dbRepo)
-        await processRepo(repo)
+        await processRepo(repo, { existingRepoId: dbRepo.id })
       }
     } else if (resumeOnly) {
       logger.info('No resumable repos found — nothing to do.')
     }
 
-    if (resumeOnly) {
-      logger.info('Pipeline completed (resume-only).')
-      return
-    }
+    if (resumeOnly) return
 
-    // 3. Fan out to GitHub search for new candidates.
     const repos = await searchRepos(query)
     logger.info(`Found ${repos.length} repositories from search.`)
     for (const repo of repos) {
@@ -296,8 +504,9 @@ async function main() {
 
     logger.info('Pipeline completed successfully.')
   } catch (error) {
-    if (error instanceof GroqDailyQuotaError) {
-      logger.error('Stopping pipeline — LLM daily quota exhausted. Re-run after reset.')
+    if (error instanceof QuotaError) {
+      logger.error(`Stopping pipeline — LLM quota exhausted (${error.name}). Re-run after reset.`)
+      process.exitCode = 1
       return
     }
     logger.error('Pipeline failed:', error.message)

@@ -28,6 +28,8 @@
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/supabase/types.ts",
+    "db:health": "node scripts/db-health.mjs",
+    "db:canonicalize": "node scripts/db-canonicalize.mjs",
     "prepare": "husky"
   },
   "dependencies": {
@@ -69,7 +71,7 @@
     "supabase": "^2.91.1",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.1"
   },
   "lint-staged": {
     "*.{js,mjs,cjs}": [

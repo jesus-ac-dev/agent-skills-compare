@@ -35,7 +35,7 @@ describe('seedCuratedRepos', () => {
 
     const result = await seedCuratedRepos()
 
-    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0 })
+    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0, curatedUrls: [] })
     expect(mockLoggerWarn).toHaveBeenCalledWith(expect.stringMatching(/curated-repos\.json/i))
     expect(mockSupabase.from).not.toHaveBeenCalled()
   })
@@ -52,7 +52,7 @@ describe('seedCuratedRepos', () => {
 
     const result = await seedCuratedRepos()
 
-    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0 })
+    expect(result).toEqual({ inserted: 0, skipped: 0, invalid: 0, curatedUrls: [] })
     expect(mockSupabase.from).not.toHaveBeenCalled()
   })
 
@@ -76,7 +76,7 @@ describe('seedCuratedRepos', () => {
     expect(result.invalid).toBe(3)
     expect(result.inserted).toBe(1)
     expect(chain.upsert).toHaveBeenCalledWith(
-      [{ repo_url: 'https://github.com/anthropics/skills', status: 'pending' }],
+      [{ repo_url: 'https://github.com/anthropics/skills', name: 'skills', status: 'pending' }],
       { onConflict: 'repo_url', ignoreDuplicates: true }
     )
   })
@@ -97,7 +97,12 @@ describe('seedCuratedRepos', () => {
 
     const result = await seedCuratedRepos()
 
-    expect(result).toEqual({ inserted: 2, skipped: 1, invalid: 0 })
+    expect(result).toEqual({
+      inserted: 2,
+      skipped: 1,
+      invalid: 0,
+      curatedUrls: ['https://github.com/a/b', 'https://github.com/c/d', 'https://github.com/e/f']
+    })
     expect(mockSupabase.from).toHaveBeenCalledWith('repos')
     expect(chain.upsert).toHaveBeenCalledTimes(1)
     expect(chain.upsert.mock.calls[0][1]).toEqual({
@@ -120,8 +125,8 @@ describe('seedCuratedRepos', () => {
 
     const rows = chain.upsert.mock.calls[0][0]
     expect(rows).toEqual([
-      { repo_url: 'https://github.com/kilo-org/kilocode', status: 'pending' },
-      { repo_url: 'https://github.com/fission-ai/openspec', status: 'pending' }
+      { repo_url: 'https://github.com/kilo-org/kilocode', name: 'kilocode', status: 'pending' },
+      { repo_url: 'https://github.com/fission-ai/openspec', name: 'openspec', status: 'pending' }
     ])
   })
 })

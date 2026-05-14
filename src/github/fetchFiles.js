@@ -22,8 +22,15 @@ export async function fetchFile(owner, repo, path) {
   }
 
   try {
-    const response = await axios.get(url, { headers })
-    return response.data
+    // responseType:'text' + identity transformResponse prevents axios from
+    // auto-parsing JSON files (e.g. marketplace.json) into Objects, which
+    // would then break generateHash() expecting a string/Buffer.
+    const response = await axios.get(url, {
+      headers,
+      responseType: 'text',
+      transformResponse: [(data) => data]
+    })
+    return typeof response.data === 'string' ? response.data : String(response.data ?? '')
   } catch (error) {
     if (error.response?.status === 404) {
       logger.warn(`File not found: ${path} in ${owner}/${repo}`)
@@ -66,22 +73,36 @@ export async function listFilesRecursive(owner, repo, branch = 'main') {
  * @param {Array<string>} files
  */
 export function filterRelevantFiles(files) {
-  const relevantExtensions = ['.md', '.txt']
-  const relevantPatterns = [
-    'README',
-    'docs/',
-    'agents/',
-    'skills/',
-    'workflows/',
-    'examples/',
-    '.claude/'
+  const binaryExtensions = [
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.pdf',
+    '.zip',
+    '.gz',
+    '.tar',
+    '.exe',
+    '.bin',
+    '.pyc',
+    '.node',
+    '.dll',
+    '.so',
+    '.dylib',
+    '.woff',
+    '.woff2',
+    '.ttf',
+    '.eot',
+    '.ico'
   ]
 
+  // The user explicitly wants "ALL files" and "no relevant patterns".
+  // We only exclude common binary extensions to prevent sending garbage to LLMs.
   return files.filter((file) => {
     const lowerFile = file.toLowerCase()
-    return (
-      relevantExtensions.some((ext) => lowerFile.endsWith(ext)) &&
-      relevantPatterns.some((pattern) => lowerFile.includes(pattern.toLowerCase()))
-    )
+    const isBinary = binaryExtensions.some((ext) => lowerFile.endsWith(ext))
+    // Also ignore common non-source directories if needed, but user said "all files".
+    // For now, let's just skip binaries.
+    return !isBinary
   })
 }

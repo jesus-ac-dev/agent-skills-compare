@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { Suspense, useEffect, useState, useMemo } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
   Table,
@@ -14,32 +15,65 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import Link from 'next/link'
 
-export default function AnalysesPage() {
+type AxisFilter = { key: 'class' | 'domain' | 'activity' | 'tag'; value: string }
+
+function readAxisFilter(params: URLSearchParams): AxisFilter | null {
+  for (const key of ['class', 'domain', 'activity', 'tag'] as const) {
+    const value = params.get(key)
+    if (value) return { key, value }
+  }
+  return null
+}
+
+const PAGE_SIZE = 50
+
+function AnalysesPageInner() {
+  const params = useSearchParams()
+  const axis = useMemo(
+    () => readAxisFilter(new URLSearchParams(params.toString())),
+    [params]
+  )
   const [analyses, setAnalyses] = useState<any[]>([])
+  const [total, setTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+
+  // Reset to first page when filter changes.
+  useEffect(() => {
+    setPage(0)
+  }, [axis])
 
   useEffect(() => {
     async function fetchAnalyses() {
-      const { data, error } = await supabase
-        .from('analysis_with_axes')
-        .select('*')
-
-      if (error) {
-        console.error('Error fetching analyses:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
-        })
-      } else {
-        setAnalyses(data || [])
+      setLoading(true)
+      const applyAxis = (q: any) => {
+        if (!axis) return q
+        if (axis.key === 'class') return q.eq('class', axis.value)
+        return q.contains(`${axis.key}s`, [axis.value])
       }
+
+      const from = page * PAGE_SIZE
+      const to = from + PAGE_SIZE - 1
+
+      const [rowsRes, countRes] = await Promise.all([
+        applyAxis(supabase.from('analysis_with_axes').select('*').range(from, to)),
+        applyAxis(
+          supabase.from('analysis_with_axes').select('*', { count: 'exact', head: true })
+        )
+      ])
+
+      if (rowsRes.error) {
+        console.error('Error fetching analyses:', rowsRes.error)
+      } else {
+        setAnalyses(rowsRes.data ?? [])
+      }
+      if (typeof countRes.count === 'number') setTotal(countRes.count)
       setLoading(false)
     }
 
     fetchAnalyses()
-  }, [])
+  }, [axis, page])
 
   const filteredAnalyses = useMemo(() => {
     return analyses.filter(a => {
@@ -61,6 +95,18 @@ export default function AnalysesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
         <h1 className="text-3xl font-bold">Analyses</h1>
+        {axis && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Filtered by</span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+              {axis.key}: {axis.value}
+              <Link href="/" className="ml-1 hover:underline" title="Clear filter">
+                ×
+              </Link>
+            </span>
+            <span className="text-muted-foreground">({analyses.length} match{analyses.length === 1 ? '' : 'es'})</span>
+          </div>
+        )}
         <Input
           placeholder="Search by repo, class, domain, activity or tag..."
           value={search}
@@ -115,6 +161,46 @@ export default function AnalysesPage() {
           </TableBody>
         </Table>
       </div>
+
+      {total !== null && total > PAGE_SIZE && !search && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))} ·{' '}
+            {total} total
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              className="px-3 py-1 rounded border bg-white hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Prev
+            </button>
+            <button
+              type="button"
+              disabled={(page + 1) * PAGE_SIZE >= total}
+              onClick={() => setPage((p) => p + 1)}
+              className="px-3 py-1 rounded border bg-white hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
+      {search && (
+        <p className="text-xs text-muted-foreground">
+          Text search filters the current page only — clear it to paginate the full result set.
+        </p>
+      )}
     </div>
+  )
+}
+
+export default function AnalysesPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AnalysesPageInner />
+    </Suspense>
   )
 }

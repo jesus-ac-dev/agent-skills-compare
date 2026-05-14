@@ -42,17 +42,32 @@ export async function upsertOpenId(table, name) {
 }
 
 /**
- * Loads closed vocabularies (classes, domains) from the DB.
- * Used to construct the Gemini responseSchema enums at runtime.
+ * Loads vocabularies (closed + open) from the DB to inject in the
+ * classifier system prompt.
+ *
+ * - classes, domains: closed lists — enums in the response schema.
+ * - activities: open list (classifier may invent new), passed as a
+ *   "prefer these" hint to reduce fragmentation in re-runs.
+ *
+ * To keep prompts bounded as the open vocabularies grow, activities are
+ * capped at the most-used 100. Less common ones drop off the hint but are
+ * still allowed (the classifier can still emit them).
  */
 export async function loadClosedVocabulary() {
-  const [classes, domains] = await Promise.all([
+  const [classes, domains, activities] = await Promise.all([
     supabase.from('classes').select('name'),
-    supabase.from('domains').select('name')
+    supabase.from('domains').select('name'),
+    supabase.from('activities').select('name')
   ])
 
   return {
     classes: (classes.data ?? []).map((r) => r.name).sort(),
-    domains: (domains.data ?? []).map((r) => r.name).sort()
+    domains: (domains.data ?? []).map((r) => r.name).sort(),
+    // Activities are semi-open: hint, not enum. Sort + cap so the prompt
+    // stays bounded regardless of DB growth.
+    activities: (activities.data ?? [])
+      .map((r) => r.name)
+      .sort()
+      .slice(0, 100)
   }
 }

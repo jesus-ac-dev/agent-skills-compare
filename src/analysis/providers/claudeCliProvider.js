@@ -1,9 +1,10 @@
 // src/analysis/providers/claudeCliProvider.js
 import { spawn } from 'child_process'
 import logger from '../../utils/logger.js'
-import { BaseProvider } from './BaseProvider.js'
+import { BaseProvider, QuotaError } from './BaseProvider.js'
 
-const QUOTA_REGEX = /rate.?limit|usage.?limit|weekly.?limit|too many/i
+const QUOTA_REGEX =
+  /rate.?limit|usage.?limit|weekly.?limit|too many|hit your limit|limit reached|out of credits/i
 const REQUIRED_KEYS = [
   'summary',
   'maturity',
@@ -22,7 +23,7 @@ export class ClaudeCliError extends Error {
   }
 }
 
-export class ClaudeCliQuotaError extends ClaudeCliError {
+export class ClaudeCliQuotaError extends QuotaError {
   constructor(message) {
     super(message)
     this.name = 'ClaudeCliQuotaError'
@@ -72,6 +73,26 @@ export class ClaudeCliProvider extends BaseProvider {
       child.on('error', (err) => reject(err))
       child.on('exit', (code) => {
         if (code !== 0) {
+          // Claude CLI puts structured error info in stdout JSON when exiting
+          // non-zero (e.g. quota errors with api_error_status=429 and
+          // is_error=true). Try that first; fall back to stderr otherwise.
+          try {
+            const env = JSON.parse(stdout)
+            if (
+              env.is_error ||
+              env.subtype === 'error' ||
+              typeof env.api_error_status === 'number'
+            ) {
+              const msg = String(env.result ?? env.error ?? '').trim()
+              const isQuota = env.api_error_status === 429 || QUOTA_REGEX.test(msg)
+              if (isQuota) {
+                return reject(new ClaudeCliQuotaError(`claude CLI quota: ${msg}`))
+              }
+              return reject(new ClaudeCliError(`claude CLI error: ${msg || stdout.trim()}`))
+            }
+          } catch {
+            // stdout was not JSON — fall through to legacy stderr handling
+          }
           if (QUOTA_REGEX.test(stderr)) {
             return reject(new ClaudeCliQuotaError(`claude CLI quota: ${stderr.trim()}`))
           }

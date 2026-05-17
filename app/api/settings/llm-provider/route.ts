@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseServer } from '@/lib/supabase-server'
 
-const ALLOWED = new Set(['groq', 'gemini', 'claude-cli'])
+const ALLOWED = new Set(['groq', 'gemini', 'claude-cli', 'codex-cli'])
 
 export async function GET() {
   const { data, error } = await supabaseServer

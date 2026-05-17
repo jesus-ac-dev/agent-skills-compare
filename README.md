@@ -5,7 +5,7 @@ Pipeline inteligente para descobrir, analisar e classificar repositórios GitHub
 Este projeto usa:
 
 - **Node.js** — backend principal (pipeline)
-- **Groq API (Llama 3.3 70B)** — análise semântica, extração de use cases, classificação (com fallback para Gemini)
+- **LLM providers** — Groq, Gemini, Claude CLI ou Codex CLI para análise semântica, extração de use cases e classificação
 - **Supabase** — base de dados relacional
 - **GitHub REST API** — descoberta e extração seletiva de ficheiros
 - **Next.js 15** — UI integrada para consulta e filtragem dos dados
@@ -26,7 +26,7 @@ Criar um sistema capaz de descobrir e catalogar "skills" e padrões agênticos r
 
 - Node.js 20+
 - Supabase (Local ou Cloud)
-- Groq API Key
+- Uma credencial/provider LLM configurado: Groq API Key, Gemini API Key, `claude` CLI ou `codex` CLI
 - GitHub Token (opcional, para evitar rate limits)
 
 ### 2. Setup

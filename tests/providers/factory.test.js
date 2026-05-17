@@ -23,6 +23,11 @@ vi.mock('../../src/analysis/providers/claudeCliProvider.js', () => ({
     static providerName = 'claude-cli'
   }
 }))
+vi.mock('../../src/analysis/providers/codexCliProvider.js', () => ({
+  CodexCliProvider: class {
+    static providerName = 'codex-cli'
+  }
+}))
 
 function chainableSelect(result) {
   return {
@@ -71,6 +76,6 @@ describe('getActiveProvider', () => {
 describe('listProviders', () => {
   it('returns all registered provider names', async () => {
     const { listProviders } = await import('../../src/analysis/providers/factory.js')
-    expect(listProviders().sort()).toEqual(['claude-cli', 'gemini', 'groq'])
+    expect(listProviders().sort()).toEqual(['claude-cli', 'codex-cli', 'gemini', 'groq'])
   })
 })

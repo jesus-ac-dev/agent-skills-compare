@@ -60,11 +60,12 @@ export async function listFilesRecursive(owner, repo, branch = 'main') {
     const response = await axios.get(url, { headers })
     return response.data.tree.filter((item) => item.type === 'blob').map((item) => item.path)
   } catch (error) {
-    logger.error(`Error listing files in ${owner}/${repo}:`, error.message)
-    // Fallback to trying 'master' if 'main' fails
+    // Fallback to trying 'master' if 'main' fails, without logging a false
+    // error when the fallback succeeds.
     if (branch === 'main') {
       return listFilesRecursive(owner, repo, 'master')
     }
+    logger.error(`Error listing files in ${owner}/${repo} (${branch}):`, error.message)
     throw error
   }
 }

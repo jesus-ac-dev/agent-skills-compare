@@ -281,8 +281,9 @@ export async function processRepo(repo, options = {}) {
   })
 
   let allFiles
+  const branch = repo.default_branch || 'main'
   try {
-    allFiles = await listFilesRecursive(repo.owner.login, repo.name)
+    allFiles = await listFilesRecursive(repo.owner.login, repo.name, branch)
   } catch (e) {
     logger.error(`Failed to list files for ${repo.full_name}: ${e.message}`)
     await setRepoStatus(repoId, {
@@ -303,7 +304,6 @@ export async function processRepo(repo, options = {}) {
     ? { urlToHash: new Map(), hashToAnalysis: new Map() }
     : await loadAnalyzedHashes(repoId)
   const sourceTypeId = await resolveClosedId('source_types', 'github_file')
-  const branch = repo.default_branch || 'main'
 
   let skippedCount = 0
   const skippedUrls = []

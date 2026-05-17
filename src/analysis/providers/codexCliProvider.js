@@ -76,11 +76,11 @@ export class CodexCliProvider extends BaseProvider {
 
       const { code, stdout, stderr } = await new Promise((resolve, reject) => {
         const args = [
+          '--ask-for-approval',
+          'never',
           'exec',
           '--sandbox',
           'read-only',
-          '--ask-for-approval',
-          'never',
           '--ephemeral',
           '--color',
           'never',

@@ -56,11 +56,11 @@ describe('CodexCliProvider.analyzeContent', () => {
     expect(mockSpawn).toHaveBeenCalledWith(
       'codex',
       expect.arrayContaining([
+        '--ask-for-approval',
+        'never',
         'exec',
         '--sandbox',
         'read-only',
-        '--ask-for-approval',
-        'never',
         '--ephemeral',
         '--output-schema',
         '--output-last-message',
@@ -68,6 +68,8 @@ describe('CodexCliProvider.analyzeContent', () => {
       ]),
       expect.any(Object)
     )
+    const args = mockSpawn.mock.calls[0][1]
+    expect(args.indexOf('--ask-for-approval')).toBeLessThan(args.indexOf('exec'))
   })
 
   it('falls back to stdout when the output file is absent', async () => {

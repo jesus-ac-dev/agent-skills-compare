@@ -4,11 +4,13 @@ import logger from '../../utils/logger.js'
 import { GroqProvider } from './groqProvider.js'
 import { GeminiProvider } from './geminiProvider.js'
 import { ClaudeCliProvider } from './claudeCliProvider.js'
+import { CodexCliProvider } from './codexCliProvider.js'
 
 const REGISTRY = {
   [GroqProvider.providerName]: GroqProvider,
   [GeminiProvider.providerName]: GeminiProvider,
-  [ClaudeCliProvider.providerName]: ClaudeCliProvider
+  [ClaudeCliProvider.providerName]: ClaudeCliProvider,
+  [CodexCliProvider.providerName]: CodexCliProvider
 }
 
 let cached = null

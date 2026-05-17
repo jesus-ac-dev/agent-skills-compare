@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 
 const POLL_INTERVAL_MS = 30_000
 
-export type ProviderName = 'groq' | 'gemini' | 'claude-cli'
+export type ProviderName = 'groq' | 'gemini' | 'claude-cli' | 'codex-cli'
 
 export interface HealthMap {
   [name: string]: { available: boolean; reason?: string }

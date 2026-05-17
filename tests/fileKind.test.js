@@ -16,6 +16,8 @@ describe('detectFileTypeName', () => {
     ['package.json', 'json'],
     ['.github/workflows/ci.yml', 'yaml'],
     ['public/index.html', 'html'],
+    ['.opencode/prompts/agents/architect.txt', 'prompt'],
+    ['prompts/code-reviewer.txt', 'prompt'],
     ['LICENSE', 'text'],
     ['Dockerfile', 'text'],
     ['weird.bin', 'text']
@@ -40,6 +42,7 @@ describe('detectFileKind', () => {
     ['src/index.ts', 'code'],
     ['package.json', 'config'],
     ['.github/ci.yml', 'config'],
+    ['.opencode/prompts/agents/architect.txt', 'prompt'],
     ['LICENSE', 'text']
   ])('%s → %s', (path, expected) => {
     expect(detectFileKind(path)).toBe(expected)

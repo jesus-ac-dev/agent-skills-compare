@@ -24,7 +24,8 @@ const EXT_TO_FILE_TYPE = {
   '.py': 'python',
   '.sh': 'shell',
   '.bash': 'shell',
-  '.zsh': 'shell'
+  '.zsh': 'shell',
+  '.txt': 'prompt'
 }
 
 const FILE_TYPE_TO_KIND = {
@@ -36,6 +37,7 @@ const FILE_TYPE_TO_KIND = {
   json: 'config',
   yaml: 'config',
   html: 'markdown', // close enough; HTML is mostly prose for our purposes
+  prompt: 'prompt',
   text: 'text'
 }
 
@@ -48,7 +50,7 @@ function getExt(path) {
 
 /**
  * @param {string} path - File path (e.g. "src/foo/bar.ts").
- * @returns {'markdown' | 'code' | 'config' | 'text'}
+ * @returns {'markdown' | 'code' | 'config' | 'prompt' | 'text'}
  */
 export function detectFileKind(path) {
   return FILE_TYPE_TO_KIND[detectFileTypeName(path)] ?? 'text'

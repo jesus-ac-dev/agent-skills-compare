@@ -17,6 +17,12 @@ plugin / hook does it register, what defaults does it set, what required fields 
     return `This file is DOCUMENTATION (path: ${path}). Focus on what the document TEACHES or
 INSTRUCTS — the actual skill/workflow it conveys, not the writing style.`
   }
+  if (kind === 'prompt') {
+    return `This file is an AGENT PROMPT (path: ${path}). Treat the entire content as the
+system/role prompt that drives an LLM agent. Focus on: what persona/role it defines, what tools
+or behaviours it grants, what the agent is supposed to DO (review code, plan, debug, etc.), and
+any constraints/guardrails it sets. Class is almost always "prompt" or "subagent".`
+  }
   return `This file is plain text (path: ${path}). Treat it as documentation by default but flag
 honestly if it has no analyzable content.`
 }
@@ -108,7 +114,7 @@ export function buildClassifyResponseSchema({ classes, domains }) {
 
 /**
  * Classifies a file with one structured LLM call.
- * The provider (Groq, Gemini, or Claude CLI) is chosen at pipeline startup
+ * The provider (Groq, Gemini, Claude CLI, or Codex CLI) is chosen at pipeline startup
  * from settings.llm_provider via the factory; classifyProject just resolves
  * the cached instance and delegates.
  */

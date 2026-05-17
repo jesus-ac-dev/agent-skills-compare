@@ -41,6 +41,10 @@ export class GeminiProvider extends BaseProvider {
 
   #client = null
 
+  get modelName() {
+    return MODEL_NAME
+  }
+
   #getClient() {
     if (!this.#client) {
       if (!process.env.GEMINI_API_KEY) {

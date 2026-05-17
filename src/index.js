@@ -43,6 +43,7 @@ async function loadAnalyzedHashes(repoId) {
         summary,
         maturity,
         score,
+        model,
         use_cases,
         classes (name),
         analysis_domains (domains (name)),
@@ -72,6 +73,7 @@ async function loadAnalyzedHashes(repoId) {
           summary: analysis.summary,
           maturity: analysis.maturity,
           score: analysis.score,
+          model: analysis.model,
           use_cases: analysis.use_cases,
           class: analysis.classes?.name,
           domains: (analysis.analysis_domains ?? []).map((d) => d.domains?.name).filter(Boolean),
@@ -95,10 +97,12 @@ async function persistClassification(fileSourceId, payload) {
     domains = [],
     activities = [],
     tags = [],
-    use_cases: useCases = []
+    use_cases: useCases = [],
+    model
   } = payload
 
   const classId = await resolveClosedId('classes', className)
+  const modelName = model || (await getActiveProvider()).modelName
 
   const { data: analysisRow, error: analysisErr } = await supabase
     .from('analysis')
@@ -110,7 +114,7 @@ async function persistClassification(fileSourceId, payload) {
         class_id: classId,
         maturity,
         score,
-        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
+        model: modelName
       },
       { onConflict: 'file_source_id' }
     )
@@ -277,8 +281,9 @@ export async function processRepo(repo, options = {}) {
   })
 
   let allFiles
+  const branch = repo.default_branch || 'main'
   try {
-    allFiles = await listFilesRecursive(repo.owner.login, repo.name)
+    allFiles = await listFilesRecursive(repo.owner.login, repo.name, branch)
   } catch (e) {
     logger.error(`Failed to list files for ${repo.full_name}: ${e.message}`)
     await setRepoStatus(repoId, {
@@ -299,7 +304,6 @@ export async function processRepo(repo, options = {}) {
     ? { urlToHash: new Map(), hashToAnalysis: new Map() }
     : await loadAnalyzedHashes(repoId)
   const sourceTypeId = await resolveClosedId('source_types', 'github_file')
-  const branch = repo.default_branch || 'main'
 
   let skippedCount = 0
   const skippedUrls = []

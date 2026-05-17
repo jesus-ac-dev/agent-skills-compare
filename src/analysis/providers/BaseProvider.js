@@ -3,7 +3,8 @@
 /**
  * Marker base class for "the provider is out of quota — stop and resume later".
  * Concrete providers throw subclasses of this (e.g. GroqDailyQuotaError,
- * ClaudeCliQuotaError) so the pipeline can react uniformly via instanceof.
+ * ClaudeCliQuotaError, CodexCliQuotaError) so the pipeline can react
+ * uniformly via instanceof.
  */
 export class QuotaError extends Error {
   constructor(message) {
@@ -40,5 +41,9 @@ export class BaseProvider {
 
   get name() {
     return this.constructor.providerName
+  }
+
+  get modelName() {
+    return this.name
   }
 }

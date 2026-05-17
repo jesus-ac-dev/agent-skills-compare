@@ -15,7 +15,8 @@ import { useProviderSettings, type ProviderName } from '@/lib/use-provider-setti
 const LABELS: Record<ProviderName, string> = {
   groq: '⚡ Groq',
   gemini: '✨ Gemini',
-  'claude-cli': '🤖 Claude CLI'
+  'claude-cli': '🤖 Claude CLI',
+  'codex-cli': '⌘ Codex CLI'
 }
 
 export function ProviderSelect() {
@@ -59,12 +60,7 @@ export function ProviderSelect() {
 
   if (running) {
     return (
-      <button
-        type="button"
-        disabled
-        className={triggerClassName}
-        title={triggerTitle}
-      >
+      <button type="button" disabled className={triggerClassName} title={triggerTitle}>
         {triggerContent}
       </button>
     )
@@ -72,10 +68,7 @@ export function ProviderSelect() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        className={triggerClassName}
-        title={triggerTitle}
-      >
+      <DropdownMenuTrigger className={triggerClassName} title={triggerTitle}>
         {triggerContent}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

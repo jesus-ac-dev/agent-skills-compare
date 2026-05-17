@@ -65,6 +65,10 @@ export class GroqProvider extends BaseProvider {
 
   #client = null
 
+  get modelName() {
+    return MODEL_NAME
+  }
+
   #getClient() {
     if (!this.#client) {
       this.#client = new Groq({ apiKey: process.env.GROQ_API_KEY, maxRetries: 0 })

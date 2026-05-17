@@ -2,9 +2,15 @@ import { NextResponse } from 'next/server'
 import { GroqProvider } from '@/src/analysis/providers/groqProvider.js'
 import { GeminiProvider } from '@/src/analysis/providers/geminiProvider.js'
 import { ClaudeCliProvider } from '@/src/analysis/providers/claudeCliProvider.js'
+import { CodexCliProvider } from '@/src/analysis/providers/codexCliProvider.js'
 
 export async function GET() {
-  const providers = [new GroqProvider(), new GeminiProvider(), new ClaudeCliProvider()]
+  const providers = [
+    new GroqProvider(),
+    new GeminiProvider(),
+    new ClaudeCliProvider(),
+    new CodexCliProvider()
+  ]
 
   const results = await Promise.all(
     providers.map(async (p) => {
